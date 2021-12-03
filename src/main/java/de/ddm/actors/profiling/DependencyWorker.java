@@ -13,6 +13,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
@@ -38,6 +39,17 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	@AllArgsConstructor
 	public static class TaskMessage implements Message {
 		private static final long serialVersionUID = -4667745204456518160L;
+		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
+		int task;
+	}
+
+	@Getter
+	@NoArgsConstructor
+	@AllArgsConstructor
+	public static class DataMessage implements Message {
+		private static final long serialVersionUID = 2135984614102497577L;
+		List<String[]> file1;
+		List<String[]> file2;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
 		int task;
 	}
@@ -87,19 +99,35 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	}
 
 	private Behavior<Message> handle(TaskMessage message) {
-		this.getContext().getLog().info("Working!");
+		this.getContext().getLog().info("Asking for work!");
 		// I should probably know how to solve this task, but for now I just pretend some work...
 
-		int result = message.getTask();
-		long time = System.currentTimeMillis();
-		Random rand = new Random();
-		int runtime = (rand.nextInt(2) + 2) * 1000;
-		while (System.currentTimeMillis() - time < runtime)
-			result = ((int) Math.abs(Math.sqrt(result)) * result) % 1334525;
+		// Request data from dependency miner
+		message.dependencyMinerLargeMessageProxy.tell(new LargeMessageProxy.SendMessage(
+				new DependencyMiner.RequestDataMessage(this.largeMessageProxy, message.task),
+				message.dependencyMinerLargeMessageProxy));
+
+		return this;
+	}
+
+	private Behavior<Message> handle(DataMessage message) {
+		this.getContext().getLog().info("Working!");
+
+		List<String[]> file1 = message.file1;
+		List<String[]> file2 = message.file2;
+
+		for(int i=0; i < file1.size(); i++) {
+			for(int j=0; j < file2.size(); j++) {
+
+			}
+		}
+
+		int result = 0;
 
 		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result);
 		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 
 		return this;
 	}
+
 }

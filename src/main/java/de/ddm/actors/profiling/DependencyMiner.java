@@ -17,13 +17,19 @@ import de.ddm.structures.InclusionDependency;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
+
+	// Local state
+	Map<Integer, Pair<Integer, Integer>> taskToFileidMap = new HashMap<>();
+	Map<Integer, List<String[]>> fileidToContentMap = new HashMap<>();
+	Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
+	Map<Integer, Boolean> taskCompletionMap = new HashMap<>();
+	int nextTaskId = 0;
 
 	////////////////////
 	// Actor Messages //
@@ -66,6 +72,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	@Getter
 	@NoArgsConstructor
 	@AllArgsConstructor
+	public static class RequestDataMessage implements Message {
+		private static final long serialVersionUID = 868083729453247423L;
+		ActorRef<LargeMessageProxy.Message> dependencyWorkerReceiverProxy;
+		int task;
+	}
+
+	@Getter
+	@NoArgsConstructor
+	@AllArgsConstructor
 	public static class CompletionMessage implements Message {
 		private static final long serialVersionUID = -7642425159675583598L;
 		ActorRef<DependencyWorker.Message> dependencyWorker;
@@ -91,8 +106,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		this.headerLines = new String[this.inputFiles.length][];
 
 		this.inputReaders = new ArrayList<>(inputFiles.length);
-		for (int id = 0; id < this.inputFiles.length; id++)
+		for (int id = 0; id < this.inputFiles.length; id++) {
 			this.inputReaders.add(context.spawn(InputReader.create(id, this.inputFiles[id]), InputReader.DEFAULT_NAME + "_" + id));
+			this.filereadCompletionMap.put(id, false);
+		}
+
 		this.resultCollector = context.spawn(ResultCollector.create(), ResultCollector.DEFAULT_NAME);
 		this.largeMessageProxy = this.getContext().spawn(LargeMessageProxy.create(this.getContext().getSelf().unsafeUpcast()), LargeMessageProxy.DEFAULT_NAME);
 
@@ -129,6 +147,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 				.onMessage(HeaderMessage.class, this::handle)
 				.onMessage(RegistrationMessage.class, this::handle)
 				.onMessage(CompletionMessage.class, this::handle)
+				.onMessage(RequestDataMessage.class, this::handle)
 				.onSignal(Terminated.class, this::handle)
 				.build();
 	}
@@ -150,8 +169,44 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private Behavior<Message> handle(BatchMessage message) {
 		// Ignoring batch content for now ... but I could do so much with it.
 
-		if (message.getBatch().size() != 0)
+		if (message.getBatch().size() != 0) {
+			ArrayList<ArrayList<String>> columnBasedBatch = new ArrayList<>();
+
+			for(int i=0; i<message.batch.get(0).length; i++) {
+				ArrayList<String> column = new ArrayList<>();
+				for (int j = 0; j < message.batch.size(); j++) {
+					column.add(message.batch.get(j)[i]);
+				}
+				fileidToContentMap.computeIfAbsent(message.id, (p) -> new ArrayList<>()).addAll(column);
+			}
+
+
+
 			this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
+		} else {
+			filereadCompletionMap.put(message.id, true);
+		}
+
+		if(!filereadCompletionMap.values().stream().allMatch((v) -> v)) {
+			return this;
+		}
+
+		int taskCounter = 0;
+		for(int i=0; i<filereadCompletionMap.size(); i++) {
+			for(int j=0; j<filereadCompletionMap.size(); j++) {
+				if(i==j) continue;
+
+				Pair<Integer, Integer> filePair = Pair.of(i,j);
+				taskToFileidMap.put(taskCounter, filePair);
+				this.taskCompletionMap.put(taskCounter, false);
+				taskCounter++;
+			}
+		}
+
+		for(ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, this.nextTaskId++));
+		}
+
 		return this;
 	}
 
@@ -188,12 +243,25 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		}
 		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
 		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
+		if(this.nextTaskId < this.taskToFileidMap.size()) {
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, this.nextTaskId++));
+		}
 
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
-
-		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
-		if (System.currentTimeMillis() - this.startTime > 2000000)
+		// End worker when all tasks are done
+		if(this.taskCompletionMap.values().stream().allMatch((v) -> v)) {
 			this.end();
+		}
+
+		return this;
+	}
+
+	private Behavior<Message> handle(RequestDataMessage message) {
+		ActorRef<LargeMessageProxy.Message> receiverProxy = message.dependencyWorkerReceiverProxy;
+
+
+
+		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(null, receiverProxy));
+
 		return this;
 	}
 
