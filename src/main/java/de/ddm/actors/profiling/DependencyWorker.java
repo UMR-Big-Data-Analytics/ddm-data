@@ -54,6 +54,15 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         int task;
     }
 
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ProcessDataMessage implements Message {
+        private static final long serialVersionUID = -5292648222781068512L;
+        ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
+        int task;
+    }
+
     @NoArgsConstructor
     public static class ShutdownMessage implements Message {
         private static final long serialVersionUID = -8612352862100883350L;
@@ -88,6 +97,11 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
+    List<Set<String>> file1;
+    List<Set<String>> file2;
+    int file1Index;
+    int file2Index;
+
     ////////////////////
     // Actor Behavior //
     ////////////////////
@@ -99,6 +113,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
                 .onMessage(TaskMessage.class, this::handle)
                 .onMessage(DataMessage.class, this::handle)
                 .onMessage(ShutdownMessage.class, this::handle)
+                .onMessage(ProcessDataMessage.class, this::handle)
                 .build();
     }
 
@@ -120,32 +135,43 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         return this;
     }
 
-    private Behavior<Message> handle(DataMessage message) {
-        this.getContext().getLog().info("Working!");
-
-        List<Set<String>> file1 = message.file1;
-        List<Set<String>> file2 = message.file2;
-
-        this.getContext().getLog().info("DataMessage: columns of file 1: {}", file1.size());
-        this.getContext().getLog().info("DataMessage: columns of file 2: {}", file2.size());
-
+    private Behavior<Message> handle(ProcessDataMessage message) {
         List<Integer[]> dependencies = new ArrayList<>();
 
-        for (int i = 0; i < file1.size(); i++) {
-            Set<String> columnOfFile1 = file1.get(i);
-            for (int j = 0; j < file2.size(); j++) {
-                Set<String> columnOfFile2 = file2.get(j);
-                this.getContext().getLog().info("check {} <- {} ?", i, j);
-                if (columnOfFile1.containsAll(columnOfFile2)) {
-                    dependencies.add(new Integer[]{i, j});
-                }
-            }
+        Set<String> columnOfFile1 = file1.get(file1Index);
+        Set<String> columnOfFile2 = file2.get(file2Index);
+        if (columnOfFile1.containsAll(columnOfFile2)) {
+            dependencies.add(new Integer[]{file1Index, file2Index});
+        }
+
+        file2Index++;
+        if(file2Index == file2.size()) {
+            file2Index = 0;
+            file1Index++;
+        }
+
+        if(file1Index != file1.size()) {
+            this.getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy, message.task));
+            return this;
         }
 
         LargeMessageProxy.LargeMessage completionMessage =
                 new DependencyMiner.CompletionMessage(this.getContext().getSelf(), dependencies, message.task);
         this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
                 message.getDependencyMinerLargeMessageProxy()));
+
+        return this;
+    }
+
+    private Behavior<Message> handle(DataMessage message) {
+        this.getContext().getLog().info("Working!");
+
+        file1 = message.file1;
+        file2 = message.file2;
+        file1Index = 0;
+        file2Index = 0;
+
+        this.getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy, message.task));
 
         return this;
     }
