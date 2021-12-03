@@ -90,6 +90,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         int taskId;
     }
 
+	@NoArgsConstructor
+	public static class ShutdownMessage implements Message {
+		private static final long serialVersionUID = -905237396060190564L;
+	}
+
     ////////////////////////
     // Actor Construction //
     ////////////////////////
@@ -156,6 +161,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 .onMessage(RegistrationMessage.class, this::handle)
                 .onMessage(CompletionMessage.class, this::handle)
                 .onMessage(RequestDataMessage.class, this::handle)
+				.onMessage(ShutdownMessage.class, this::handle)
                 .onSignal(Terminated.class, this::handle)
                 .build();
     }
@@ -321,4 +327,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.dependencyWorkers.remove(dependencyWorker);
         return this;
     }
+
+	private Behavior<Message> handle(ShutdownMessage message) {
+		return Behaviors.stopped();
+	}
 }

@@ -76,6 +76,9 @@ public class Master extends AbstractBehavior<Master.Message> {
 		// we should propagate this ShutdownMessage to all active child actors so that they
 		// can end their protocols in a clean way. Simply stopping this actor also stops all
 		// child actors, but in a hard way!
+
+		this.dependencyMiner.tell(new DependencyMiner.ShutdownMessage());
+
 		return Behaviors.stopped();
 	}
 }

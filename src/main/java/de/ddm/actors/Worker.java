@@ -73,6 +73,11 @@ public class Worker extends AbstractBehavior<Worker.Message> {
 		// we should propagate this ShutdownMessage to all active child actors so that they
 		// can end their protocols in a clean way. Simply stopping this actor also stops all
 		// child actors, but in a hard way!
+
+		for(ActorRef<DependencyWorker.Message> dependencyWorker : this.workers) {
+			dependencyWorker.tell(new DependencyWorker.ShutdownMessage());
+		}
+
 		return Behaviors.stopped();
 	}
 }
