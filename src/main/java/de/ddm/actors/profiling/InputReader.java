@@ -60,6 +60,8 @@ public class InputReader extends AbstractBehavior<InputReader.Message> {
 		super(context);
 		this.id = id;
 		this.reader = InputConfigurationSingleton.get().createCSVReader(inputFile);
+		// SKIP headers?
+		this.reader.readNext();
 		this.header = InputConfigurationSingleton.get().getHeader(inputFile);
 	}
 
