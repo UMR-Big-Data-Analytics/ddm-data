@@ -28,12 +28,8 @@ import java.util.*;
 public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     // Local state
-    Map<Integer, Pair<Integer, Integer>> taskToFileidMap = new HashMap<>();
-    Map<Integer, List<List<String>>> fileidToContentMap = new HashMap<>();
+    Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
-    Map<Integer, Boolean> taskCompletionMap = new HashMap<>();
-    int nextTaskId = 0;
-
     Map<ActorRef<DependencyWorker.Message>, Integer> actorRefToFileMap = new HashMap<>();
 
     ////////////////////
@@ -200,11 +196,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.getContext().getLog().info("BatchMessage of file {}", message.id);
         if (message.getBatch().size() != 0) {
             for (int i = 0; i < message.batch.get(0).length; i++) {
-                List<String> column = new ArrayList<>();
+                Set<String> column = new TreeSet<>();
                 for (int j = 0; j < message.batch.size(); j++) {
                     column.add(message.batch.get(j)[i]);
                 }
-                List<List<String>> columnList = fileidToContentMap.get(message.id);
+                List<Set<String>> columnList = fileidToContentMap.get(message.id);
                 if (i < columnList.size()) {
                     columnList.get(i).addAll(column);
                 } else {
@@ -322,9 +318,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.getContext().getLog().info("Requesting Data {}", receiverProxy.toString());
 
-        List<List<String>> referencedFile = message.referencedFileId == -1 ? null :
+        List<Set<String>> referencedFile = message.referencedFileId == -1 ? null :
                 this.fileidToContentMap.get(message.referencedFileId);
-        List<String> maybeDependentColumn =
+        Set<String> maybeDependentColumn =
                 fileidToContentMap.get(message.getMaybeDependentFileId()).get(message.getMaybeDependentColumnIndex());
 
         //this.getContext().getLog().info("columns of file 1: {}", file1.size());

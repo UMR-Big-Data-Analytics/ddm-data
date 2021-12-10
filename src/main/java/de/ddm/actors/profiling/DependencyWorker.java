@@ -50,8 +50,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     @AllArgsConstructor
     public static class DataMessage implements Message {
         private static final long serialVersionUID = 2135984614102497577L;
-        List<List<String>> referencedFile;
-        List<String> maybeDependentColumn;
+        List<Set<String>> referencedFile;
+        Set<String> maybeDependentColumn;
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
     }
 
@@ -97,9 +97,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
-    private List<List<String>> referencedFile = null;
+    private List<Set<String>> referencedFile = null;
     private int nextReferencedColumnId = 0;
-    private List<String> dependentColumn = null;
+    private Set<String> dependentColumn = null;
     private int referencedFileId = -1;
     private int dependentFileId = -1;
     private int dependentFileColumnIndex = -1;
@@ -148,7 +148,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     }
 
     private Behavior<Message> handle(ProcessDataMessage message) {
-        List<String> columnOfFile1 = this.referencedFile.get(this.nextReferencedColumnId);
+        Set<String> columnOfFile1 = this.referencedFile.get(this.nextReferencedColumnId);
         this.getContext().getLog().info("check {} <- {} ?", this.nextReferencedColumnId, this.dependentFileColumnIndex);
         if (columnOfFile1.containsAll(this.dependentColumn)) {
             this.dependencies.add(new Integer[]{this.nextReferencedColumnId, this.dependentFileColumnIndex});
