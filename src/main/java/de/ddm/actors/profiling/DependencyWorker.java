@@ -40,7 +40,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     public static class TaskMessage implements Message {
         private static final long serialVersionUID = -4667745204456518160L;
         ActorRef<DependencyMiner.Message> dependencyMiner;
-        int task;
+        int referencedFileId;
+        int dependentFileId;
+        int dependentFileColumnIndex;
     }
 
     @Getter
@@ -48,10 +50,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     @AllArgsConstructor
     public static class DataMessage implements Message {
         private static final long serialVersionUID = 2135984614102497577L;
-        List<Set<String>> file1;
-        List<Set<String>> file2;
+        List<List<String>> referencedFile;
+        List<String> maybeDependentColumn;
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
-        int task;
     }
 
     @Getter
@@ -60,7 +61,6 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     public static class ProcessDataMessage implements Message {
         private static final long serialVersionUID = -5292648222781068512L;
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
-        int task;
     }
 
     @NoArgsConstructor
@@ -97,10 +97,13 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
-    List<Set<String>> file1;
-    List<Set<String>> file2;
-    int file1Index;
-    int file2Index;
+    private List<List<String>> referencedFile = null;
+    private int nextReferencedColumnId = 0;
+    private List<String> dependentColumn = null;
+    private int referencedFileId = -1;
+    private int dependentFileId = -1;
+    private int dependentFileColumnIndex = -1;
+    List<Integer[]> dependencies = new ArrayList<>();
 
     ////////////////////
     // Actor Behavior //
@@ -112,7 +115,6 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
                 .onMessage(ReceptionistListingMessage.class, this::handle)
                 .onMessage(TaskMessage.class, this::handle)
                 .onMessage(DataMessage.class, this::handle)
-                .onMessage(ShutdownMessage.class, this::handle)
                 .onMessage(ProcessDataMessage.class, this::handle)
                 .build();
     }
@@ -129,36 +131,38 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         this.getContext().getLog().info("Asking for work!");
         // I should probably know how to solve this task, but for now I just pretend some work...
 
+        boolean needReferencedFileData = message.referencedFileId != this.referencedFileId;
+        this.referencedFileId = message.referencedFileId;
+        this.dependentFileId = message.dependentFileId;
+        this.dependentFileColumnIndex = message.dependentFileColumnIndex;
+
+        this.nextReferencedColumnId = 0;
+        this.dependencies = new ArrayList<>();
         // Request data from dependency miner
-        message.dependencyMiner.tell(new DependencyMiner.RequestDataMessage(this.largeMessageProxy, message.task));
+        getContext().getLog().info("TaskMessage: referencedFileId: " + this.referencedFileId + ", dependentFileId:" + this.dependentFileId + ", dependentFileColumnIndex: " + this.dependentFileColumnIndex);
+        message.dependencyMiner.tell(new DependencyMiner.RequestDataMessage(this.largeMessageProxy,
+                needReferencedFileData ? this.referencedFileId : -1, this.dependentFileId,
+                this.dependentFileColumnIndex));
 
         return this;
     }
 
     private Behavior<Message> handle(ProcessDataMessage message) {
-        List<Integer[]> dependencies = new ArrayList<>();
-
-        Set<String> columnOfFile1 = file1.get(file1Index);
-        Set<String> columnOfFile2 = file2.get(file2Index);
-        if (columnOfFile1.containsAll(columnOfFile2)) {
-            dependencies.add(new Integer[]{file1Index, file2Index});
+        List<String> columnOfFile1 = this.referencedFile.get(this.nextReferencedColumnId);
+        this.getContext().getLog().info("check {} <- {} ?", this.nextReferencedColumnId, this.dependentFileColumnIndex);
+        if (columnOfFile1.containsAll(this.dependentColumn)) {
+            this.dependencies.add(new Integer[]{this.nextReferencedColumnId, this.dependentFileColumnIndex});
         }
-
-        file2Index++;
-        if(file2Index == file2.size()) {
-            file2Index = 0;
-            file1Index++;
+        this.nextReferencedColumnId += 1;
+        if (this.nextReferencedColumnId >= this.referencedFile.size()) {
+            LargeMessageProxy.LargeMessage completionMessage =
+                    new DependencyMiner.CompletionMessage(this.getContext().getSelf(), this.dependencies,
+                            this.dependentFileId);
+            this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
+                    message.getDependencyMinerLargeMessageProxy()));
+        } else {
+            getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy));
         }
-
-        if(file1Index != file1.size()) {
-            this.getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy, message.task));
-            return this;
-        }
-
-        LargeMessageProxy.LargeMessage completionMessage =
-                new DependencyMiner.CompletionMessage(this.getContext().getSelf(), dependencies, message.task);
-        this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
-                message.getDependencyMinerLargeMessageProxy()));
 
         return this;
     }
@@ -166,18 +170,14 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     private Behavior<Message> handle(DataMessage message) {
         this.getContext().getLog().info("Working!");
 
-        file1 = message.file1;
-        file2 = message.file2;
-        file1Index = 0;
-        file2Index = 0;
+        if (message.referencedFile != null) {
+            this.referencedFile = message.referencedFile;
+        }
+        this.dependentColumn = message.maybeDependentColumn;
 
-        this.getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy, message.task));
+        getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy));
 
         return this;
-    }
-
-    private Behavior<Message> handle(ShutdownMessage message) {
-        return Behaviors.stopped();
     }
 
 }

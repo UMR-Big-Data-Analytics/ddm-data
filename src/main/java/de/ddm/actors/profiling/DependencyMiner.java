@@ -9,6 +9,7 @@ import akka.actor.typed.javadsl.Behaviors;
 import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.receptionist.Receptionist;
 import akka.actor.typed.receptionist.ServiceKey;
+import de.ddm.actors.TaskFactory;
 import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
 import de.ddm.singletons.InputConfigurationSingleton;
@@ -28,10 +29,12 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     // Local state
     Map<Integer, Pair<Integer, Integer>> taskToFileidMap = new HashMap<>();
-    Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
+    Map<Integer, List<List<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
     Map<Integer, Boolean> taskCompletionMap = new HashMap<>();
     int nextTaskId = 0;
+
+    Map<ActorRef<DependencyWorker.Message>, Integer> actorRefToFileMap = new HashMap<>();
 
     ////////////////////
     // Actor Messages //
@@ -77,7 +80,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     public static class RequestDataMessage implements Message {
         private static final long serialVersionUID = 868083729453247423L;
         ActorRef<LargeMessageProxy.Message> dependencyWorkerReceiverProxy;
-        int task;
+        int referencedFileId;
+        int maybeDependentFileId;
+        int maybeDependentColumnIndex;
     }
 
     @Getter
@@ -87,13 +92,13 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         private static final long serialVersionUID = -7642425159675583598L;
         ActorRef<DependencyWorker.Message> dependencyWorker;
         List<Integer[]> dependencies;
-        int taskId;
+        int maybeDependentFileId;
     }
 
-	@NoArgsConstructor
-	public static class ShutdownMessage implements Message {
-		private static final long serialVersionUID = -905237396060190564L;
-	}
+    @NoArgsConstructor
+    public static class ShutdownMessage implements Message {
+        private static final long serialVersionUID = -905237396060190564L;
+    }
 
     ////////////////////////
     // Actor Construction //
@@ -129,6 +134,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.dependencyWorkers = new ArrayList<>();
 
+        this.unemployedDependencyWorkers = new ArrayList<>();
+
         context.getSystem().receptionist().tell(Receptionist.register(dependencyMinerService, context.getSelf()));
     }
 
@@ -142,11 +149,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final File[] inputFiles;
     private final String[][] headerLines;
 
+    private TaskFactory taskFactory;
+
     private final List<ActorRef<InputReader.Message>> inputReaders;
     private final ActorRef<ResultCollector.Message> resultCollector;
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
     private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
+
+    private final List<ActorRef<DependencyWorker.Message>> unemployedDependencyWorkers;
 
     ////////////////////
     // Actor Behavior //
@@ -161,7 +172,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 .onMessage(RegistrationMessage.class, this::handle)
                 .onMessage(CompletionMessage.class, this::handle)
                 .onMessage(RequestDataMessage.class, this::handle)
-				.onMessage(ShutdownMessage.class, this::handle)
+                .onMessage(ShutdownMessage.class, this::handle)
                 .onSignal(Terminated.class, this::handle)
                 .build();
     }
@@ -177,6 +188,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private Behavior<Message> handle(HeaderMessage message) {
         this.headerLines[message.getId()] = message.getHeader();
+        if (this.taskFactory == null && Arrays.stream(headerLines).allMatch(Objects::nonNull)) {
+            // TODO what is with timing ?
+            this.taskFactory = new TaskFactory(this.getContext().getSelf(), this.headerLines);
+        }
         return this;
     }
 
@@ -185,11 +200,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.getContext().getLog().info("BatchMessage of file {}", message.id);
         if (message.getBatch().size() != 0) {
             for (int i = 0; i < message.batch.get(0).length; i++) {
-                Set<String> column = new HashSet<>();
+                List<String> column = new ArrayList<>();
                 for (int j = 0; j < message.batch.size(); j++) {
                     column.add(message.batch.get(j)[i]);
                 }
-                List<Set<String>> columnList = fileidToContentMap.get(message.id);
+                List<List<String>> columnList = fileidToContentMap.get(message.id);
                 if (i < columnList.size()) {
                     columnList.get(i).addAll(column);
                 } else {
@@ -209,21 +224,17 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.getContext().getLog().info("Finished reading the input");
 
-        int taskCounter = 0;
-        for (int i = 0; i < filereadCompletionMap.size(); i++) {
-            for (int j = 0; j < filereadCompletionMap.size(); j++) {
-                if (i == j)
-                    continue;
-
-                Pair<Integer, Integer> filePair = Pair.of(i, j);
-                taskToFileidMap.put(taskCounter, filePair);
-                this.taskCompletionMap.put(taskCounter, false);
-                taskCounter++;
-            }
-        }
 
         for (ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
-            dependencyWorker.tell(new DependencyWorker.TaskMessage(getContext().getSelf(), this.nextTaskId++));
+            if (!this.taskFactory.isAllWorkDistributed()) {
+                int referencedFileId = this.taskFactory.nextReferencedFileId();
+                this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
+                if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
+                    dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
+                }
+            } else {
+                this.unemployedDependencyWorkers.add(dependencyWorker);
+            }
         }
 
         return this;
@@ -238,15 +249,20 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             // from her.
             // I probably need to idle the worker for a while, if I do not have work for it right now ... (see
             // master/worker pattern)
-            // TODO handle the case if the worker join after the input is completely read
 
             if (!filereadCompletionMap.values().stream().allMatch((v) -> v)) {
                 return this;
             }
-            if (this.nextTaskId < this.taskToFileidMap.size()) {
-                dependencyWorker.tell(new DependencyWorker.TaskMessage(getContext().getSelf(), this.nextTaskId++));
-            }
 
+            if (!this.taskFactory.isAllWorkDistributed()) {
+                int referencedFileId = this.taskFactory.nextReferencedFileId();
+                this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
+                if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
+                    dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
+                }
+            } else {
+                this.unemployedDependencyWorkers.add(dependencyWorker);
+            }
             //dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
         }
         return this;
@@ -260,17 +276,16 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         List<InclusionDependency> inds = new ArrayList<>(1);
 
         List<Integer[]> dependencies = message.dependencies;
-        int taskId = message.taskId;
-        Pair<Integer, Integer> fileIdPair = taskToFileidMap.get(taskId);
 
-        taskCompletionMap.put(message.taskId, true);
 
-        File referencedFile = this.inputFiles[fileIdPair.getLeft()];
-        File dependentFile = this.inputFiles[fileIdPair.getRight()];
+        File referencedFile = this.inputFiles[this.actorRefToFileMap.get(dependencyWorker)];
+        File dependentFile = this.inputFiles[message.maybeDependentFileId];
+
+        getContext().getLog().info("CompletionMessage: dependentFileId: " + message.maybeDependentFileId);
 
         for (Integer[] dependency : dependencies) {
-            String referencedAttribute = this.headerLines[fileIdPair.getLeft()][dependency[0]];
-            String dependentAttribute = this.headerLines[fileIdPair.getRight()][dependency[1]];
+            String referencedAttribute = this.headerLines[this.actorRefToFileMap.get(dependencyWorker)][dependency[0]];
+            String dependentAttribute = this.headerLines[message.maybeDependentFileId][dependency[1]];
 
             InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute},
                     referencedFile, new String[]{referencedAttribute});
@@ -283,14 +298,20 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         // I still don't know what task the worker could help me to solve ... but let me keep her busy.
         // Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to
         // detect n-ary INDs as well!
-        if (this.nextTaskId < this.taskToFileidMap.size()) {
-            dependencyWorker.tell(new DependencyWorker.TaskMessage(getContext().getSelf(), this.nextTaskId++));
-        }
-
-        // End worker when all tasks are done
-        if (this.taskCompletionMap.values().stream().allMatch((v) -> v)) {
-
-            this.end();
+        int referencedFileId = this.actorRefToFileMap.get(dependencyWorker);
+        if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
+            dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
+        } else if (!this.taskFactory.isAllWorkDistributed()) {
+            int newReferencedFileId = this.taskFactory.nextReferencedFileId();
+            this.actorRefToFileMap.put(dependencyWorker, newReferencedFileId);
+            if (this.taskFactory.hasNextTaskByReferencedFile(newReferencedFileId)) {
+                dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(newReferencedFileId));
+            }
+        } else {
+            this.unemployedDependencyWorkers.add(dependencyWorker);
+            if (this.unemployedDependencyWorkers.containsAll(this.dependencyWorkers)) {
+                this.end();
+            }
         }
 
         return this;
@@ -301,16 +322,17 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.getContext().getLog().info("Requesting Data {}", receiverProxy.toString());
 
-        int taskId = message.task;
-        Pair<Integer, Integer> fileIds = taskToFileidMap.get(taskId);
-        List<Set<String>> file1 = fileidToContentMap.get(fileIds.getLeft());
-        List<Set<String>> file2 = fileidToContentMap.get(fileIds.getRight());
+        List<List<String>> referencedFile = message.referencedFileId == -1 ? null :
+                this.fileidToContentMap.get(message.referencedFileId);
+        List<String> maybeDependentColumn =
+                fileidToContentMap.get(message.getMaybeDependentFileId()).get(message.getMaybeDependentColumnIndex());
 
-        this.getContext().getLog().info("columns of file 1: {}", file1.size());
-        this.getContext().getLog().info("columns of file 2: {}", file2.size());
+        //this.getContext().getLog().info("columns of file 1: {}", file1.size());
+        //this.getContext().getLog().info("columns of file 2: {}", file2.size());
 
-        LargeMessageProxy.LargeMessage largeMessage = new DependencyWorker.DataMessage(file1, file2,
-                this.largeMessageProxy, taskId);
+        LargeMessageProxy.LargeMessage largeMessage = new DependencyWorker.DataMessage(referencedFile,
+                maybeDependentColumn,
+                this.largeMessageProxy);
         this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(largeMessage, receiverProxy));
 
         return this;
@@ -328,7 +350,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
-	private Behavior<Message> handle(ShutdownMessage message) {
-		return Behaviors.stopped();
-	}
+    private Behavior<Message> handle(ShutdownMessage message) {
+        return Behaviors.stopped();
+    }
 }
