@@ -19,7 +19,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.File;
 import java.util.*;
@@ -31,6 +30,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
     Map<ActorRef<DependencyWorker.Message>, Integer> actorRefToFileMap = new HashMap<>();
+    Map<ActorRef<DependencyWorker.Message>, Boolean> actorRefToActorOccupationMap = new HashMap<>();
 
     ////////////////////
     // Actor Messages //
@@ -115,6 +115,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
         this.headerLines = new String[this.inputFiles.length][];
 
+        this.taskFactory = new TaskFactory(this.getContext().getSelf());
+
         this.inputReaders = new ArrayList<>(inputFiles.length);
         for (int id = 0; id < this.inputFiles.length; id++) {
             this.inputReaders.add(context.spawn(InputReader.create(id, this.inputFiles[id]),
@@ -184,10 +186,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private Behavior<Message> handle(HeaderMessage message) {
         this.headerLines[message.getId()] = message.getHeader();
-        if (this.taskFactory == null && Arrays.stream(headerLines).allMatch(Objects::nonNull)) {
-            // TODO what is with timing ?
-            this.taskFactory = new TaskFactory(this.getContext().getSelf(), this.headerLines);
-        }
         return this;
     }
 
@@ -212,24 +210,19 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
         } else {
             filereadCompletionMap.put(message.id, true);
+            this.getContext().getLog().info("File {} complete", message.id);
+            this.taskFactory.addFile(message.id, this.fileidToContentMap.get(message.id).size());
         }
-
-        if (!filereadCompletionMap.values().stream().allMatch((v) -> v)) {
-            return this;
-        }
-
-        this.getContext().getLog().info("Finished reading the input");
-
 
         for (ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
-            if (!this.taskFactory.isAllWorkDistributed()) {
+            if (this.taskFactory.hasWork() && !this.actorRefToActorOccupationMap.get(dependencyWorker)) {
                 int referencedFileId = this.taskFactory.nextReferencedFileId();
+
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
+                    this.actorRefToActorOccupationMap.put(dependencyWorker, true);
                     dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
                 }
-            } else {
-                this.unemployedDependencyWorkers.add(dependencyWorker);
             }
         }
 
@@ -246,21 +239,18 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             // I probably need to idle the worker for a while, if I do not have work for it right now ... (see
             // master/worker pattern)
 
-            if (!filereadCompletionMap.values().stream().allMatch((v) -> v)) {
-                return this;
-            }
+            this.actorRefToActorOccupationMap.put(dependencyWorker, false);
 
-            if (!this.taskFactory.isAllWorkDistributed()) {
+            if (this.taskFactory.hasWork()) {
                 int referencedFileId = this.taskFactory.nextReferencedFileId();
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
+                    this.actorRefToActorOccupationMap.put(dependencyWorker, true);
                     dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
                 }
-            } else {
-                this.unemployedDependencyWorkers.add(dependencyWorker);
             }
-            //dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
         }
+
         return this;
     }
 
@@ -297,17 +287,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         int referencedFileId = this.actorRefToFileMap.get(dependencyWorker);
         if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
             dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
-        } else if (!this.taskFactory.isAllWorkDistributed()) {
+            return this;
+        } else if (this.taskFactory.hasWork()) {
             int newReferencedFileId = this.taskFactory.nextReferencedFileId();
             this.actorRefToFileMap.put(dependencyWorker, newReferencedFileId);
             if (this.taskFactory.hasNextTaskByReferencedFile(newReferencedFileId)) {
                 dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(newReferencedFileId));
             }
+            return this;
         } else {
-            this.unemployedDependencyWorkers.add(dependencyWorker);
-            if (this.unemployedDependencyWorkers.containsAll(this.dependencyWorkers)) {
-                this.end();
-            }
+            this.actorRefToActorOccupationMap.put(dependencyWorker, false);
+        }
+
+        if (this.filereadCompletionMap.values().stream().allMatch((v) -> v)
+                && this.actorRefToActorOccupationMap.values().stream().noneMatch((v) -> v)
+                && !this.taskFactory.hasWork()) {
+            this.end();
         }
 
         return this;

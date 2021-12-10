@@ -4,9 +4,7 @@ import akka.actor.typed.ActorRef;
 import de.ddm.actors.profiling.DependencyMiner;
 import de.ddm.actors.profiling.DependencyWorker;
 
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.Queue;
+import java.util.*;
 
 public class TaskFactory {
     private final ActorRef<DependencyMiner.Message> dependencyMinerRef;
@@ -14,71 +12,83 @@ public class TaskFactory {
     class TaskCounter implements Iterator<DependencyWorker.TaskMessage> {
         int referencedFileId;
         int nextDependentColumnIndex;
-        int currentDependentFileId;
+
+        Queue<Integer> remainingDependentFileIds = new LinkedList<>();
 
         public TaskCounter(int referencedFileId) {
             this.referencedFileId = referencedFileId;
             this.nextDependentColumnIndex = 0;
-            this.currentDependentFileId = referencedFileId == 0 ? 1 : 0;
+        }
+
+        public void addDependentFile(int dependentFileId) {
+            if(this.referencedFileId != dependentFileId) {
+                this.remainingDependentFileIds.offer(dependentFileId);
+            }
         }
 
         @Override
         public boolean hasNext() {
-            return currentDependentFileId < numberOfFiles;
+            return !this.remainingDependentFileIds.isEmpty();
         }
 
         @Override
         public DependencyWorker.TaskMessage next() {
             DependencyWorker.TaskMessage nextTaskMessage;
 
+            int currentDependentFileId = this.remainingDependentFileIds.peek();
+
             nextTaskMessage = new DependencyWorker.TaskMessage(dependencyMinerRef, this.referencedFileId,
-                    this.currentDependentFileId, this.nextDependentColumnIndex);
+                    currentDependentFileId, this.nextDependentColumnIndex);
             this.nextDependentColumnIndex += 1;
-            if (this.nextDependentColumnIndex >= columnNumberOfFiles[this.currentDependentFileId]) {
+            if (this.nextDependentColumnIndex >= fileToColumnCountMap.get(currentDependentFileId)) {
                 this.nextDependentColumnIndex = 0;
-                this.currentDependentFileId += 1;
-                if (this.referencedFileId == this.currentDependentFileId) {
-                    this.currentDependentFileId += 1;
-                }
+                this.remainingDependentFileIds.poll();
             }
 
             return nextTaskMessage;
         }
     }
 
-    int numberOfFiles;
-    int[] columnNumberOfFiles;
-    TaskCounter[] taskCounters;
+    Map<Integer, Integer> fileToColumnCountMap = new HashMap<>();
+    Map<Integer, TaskCounter> fileToTaskCounter = new HashMap<>();
 
     Queue<Integer> nextReferencedFileId = new LinkedList<>();
 
-    public TaskFactory(ActorRef<DependencyMiner.Message> dependencyMinerRef, String[][] headerLines) {
+    public TaskFactory(ActorRef<DependencyMiner.Message> dependencyMinerRef) {
         this.dependencyMinerRef = dependencyMinerRef;
-        this.numberOfFiles = headerLines.length;
-        this.columnNumberOfFiles = new int[headerLines.length];
-        this.taskCounters = new TaskCounter[headerLines.length];
-        for (int i = 0; i < this.columnNumberOfFiles.length; i++) {
-            this.columnNumberOfFiles[i] = headerLines[i].length;
-            this.taskCounters[i] = new TaskCounter(i);
-            this.nextReferencedFileId.offer(i);
-        }
+    }
 
+    public void addFile(int fileId, int columns) {
+        // add new file id to all existing task counters
+        for(TaskCounter tc : this.fileToTaskCounter.values()) {
+            tc.addDependentFile(fileId);
+        }
+        // create new task counter for new file and add all existing file ids
+        TaskCounter taskCounter = new TaskCounter(fileId);
+        for(int dependentFileId : this.fileToTaskCounter.keySet()) {
+            taskCounter.addDependentFile(dependentFileId);
+        }
+        this.fileToColumnCountMap.put(fileId, columns);
+        this.fileToTaskCounter.put(fileId, taskCounter);
+        // reset referencedFileId queue when there is a new file
+        this.nextReferencedFileId.clear();
+        this.nextReferencedFileId.addAll(this.fileToTaskCounter.keySet());
     }
 
     public boolean hasNextTaskByReferencedFile(int referencedFileId) {
-        return this.taskCounters[referencedFileId].hasNext();
+        return this.fileToTaskCounter.get(referencedFileId).hasNext();
     }
 
     public DependencyWorker.TaskMessage nextTaskByReferencedFile(int referencedFileId) {
-        DependencyWorker.TaskMessage message = this.taskCounters[referencedFileId].next();
+        DependencyWorker.TaskMessage message = this.fileToTaskCounter.get(referencedFileId).next();
         if (!hasNextTaskByReferencedFile(referencedFileId)) {
             nextReferencedFileId.remove(referencedFileId);
         }
         return message;
     }
 
-    public boolean isAllWorkDistributed() {
-        return this.nextReferencedFileId.isEmpty();
+    public boolean hasWork() {
+        return this.nextReferencedFileId.stream().anyMatch((id) -> this.fileToTaskCounter.get(id).hasNext());
     }
 
     public Integer nextReferencedFileId() {
