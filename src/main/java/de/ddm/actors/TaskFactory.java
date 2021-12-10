@@ -7,12 +7,12 @@ import de.ddm.actors.profiling.DependencyWorker;
 import java.util.*;
 
 public class TaskFactory {
-    private final ActorRef<DependencyMiner.Message> dependencyMinerRef;
 
     class TaskCounter implements Iterator<DependencyWorker.TaskMessage> {
         int referencedFileId;
         int nextDependentColumnIndex;
 
+        Queue<DependencyWorker.TaskMessage> failedTasks = new LinkedList<>();
         Queue<Integer> remainingDependentFileIds = new LinkedList<>();
 
         public TaskCounter(int referencedFileId) {
@@ -28,11 +28,15 @@ public class TaskFactory {
 
         @Override
         public boolean hasNext() {
-            return !this.remainingDependentFileIds.isEmpty();
+            return !this.remainingDependentFileIds.isEmpty() || !this.failedTasks.isEmpty();
         }
 
         @Override
         public DependencyWorker.TaskMessage next() {
+            if(!failedTasks.isEmpty()) {
+                return failedTasks.poll();
+            }
+
             DependencyWorker.TaskMessage nextTaskMessage;
 
             int currentDependentFileId = this.remainingDependentFileIds.peek();
@@ -49,8 +53,12 @@ public class TaskFactory {
         }
     }
 
+    private final ActorRef<DependencyMiner.Message> dependencyMinerRef;
+
     Map<Integer, Integer> fileToColumnCountMap = new HashMap<>();
     Map<Integer, TaskCounter> fileToTaskCounter = new HashMap<>();
+
+
 
     Queue<Integer> nextReferencedFileId = new LinkedList<>();
 
@@ -95,5 +103,12 @@ public class TaskFactory {
         Integer nextId = this.nextReferencedFileId.poll();
         this.nextReferencedFileId.offer(nextId);
         return nextId;
+    }
+
+    public void addFailedTask(DependencyWorker.TaskMessage taskMessage) {
+        if(!this.nextReferencedFileId.contains(taskMessage.getReferencedFileId())) {
+            this.nextReferencedFileId.offer(taskMessage.getReferencedFileId());
+        }
+        this.fileToTaskCounter.get(taskMessage.getReferencedFileId()).failedTasks.offer(taskMessage);
     }
 }

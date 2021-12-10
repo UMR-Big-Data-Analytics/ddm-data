@@ -30,7 +30,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
     Map<ActorRef<DependencyWorker.Message>, Integer> actorRefToFileMap = new HashMap<>();
-    Map<ActorRef<DependencyWorker.Message>, Boolean> actorRefToActorOccupationMap = new HashMap<>();
+    Map<ActorRef<DependencyWorker.Message>, DependencyWorker.TaskMessage> actorRefToActorOccupationMap = new HashMap<>();
 
     ////////////////////
     // Actor Messages //
@@ -215,13 +215,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         }
 
         for (ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
-            if (this.taskFactory.hasWork() && !this.actorRefToActorOccupationMap.get(dependencyWorker)) {
+            if (this.taskFactory.hasWork() && this.actorRefToActorOccupationMap.get(dependencyWorker) == null) {
                 int referencedFileId = this.taskFactory.nextReferencedFileId();
 
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
-                    this.actorRefToActorOccupationMap.put(dependencyWorker, true);
-                    dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
+                    DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(referencedFileId);
+                    this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
+                    dependencyWorker.tell(taskMessage);
                 }
             }
         }
@@ -239,14 +240,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             // I probably need to idle the worker for a while, if I do not have work for it right now ... (see
             // master/worker pattern)
 
-            this.actorRefToActorOccupationMap.put(dependencyWorker, false);
+            this.actorRefToActorOccupationMap.put(dependencyWorker, null);
 
             if (this.taskFactory.hasWork()) {
                 int referencedFileId = this.taskFactory.nextReferencedFileId();
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
-                    this.actorRefToActorOccupationMap.put(dependencyWorker, true);
-                    dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedFileId));
+                    DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(referencedFileId);
+                    this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
+                    dependencyWorker.tell(taskMessage);
                 }
             }
         }
@@ -296,11 +298,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             }
             return this;
         } else {
-            this.actorRefToActorOccupationMap.put(dependencyWorker, false);
+            this.actorRefToActorOccupationMap.put(dependencyWorker, null);
         }
 
         if (this.filereadCompletionMap.values().stream().allMatch((v) -> v)
-                && this.actorRefToActorOccupationMap.values().stream().noneMatch((v) -> v)
+                && this.actorRefToActorOccupationMap.values().stream().allMatch(Objects::isNull)
                 && !this.taskFactory.hasWork()) {
             this.end();
         }
@@ -337,7 +339,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private Behavior<Message> handle(Terminated signal) {
         ActorRef<DependencyWorker.Message> dependencyWorker = signal.getRef().unsafeUpcast();
+        this.getContext().getLog().error("Actor {} has terminated", dependencyWorker);
+        DependencyWorker.TaskMessage taskMessage = this.actorRefToActorOccupationMap.remove(dependencyWorker);
+        this.actorRefToFileMap.remove(dependencyWorker);
         this.dependencyWorkers.remove(dependencyWorker);
+
+        boolean addToTaskFactory = true;
+        for(ActorRef<DependencyWorker.Message> worker : this.dependencyWorkers) {
+            if(this.actorRefToActorOccupationMap.get(worker) == null) {
+                worker.tell(taskMessage);
+                addToTaskFactory = false;
+                break;
+            }
+        }
+        if(addToTaskFactory) {
+            this.taskFactory.addFailedTask(taskMessage);
+        }
         return this;
     }
 
