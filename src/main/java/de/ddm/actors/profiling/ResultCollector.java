@@ -18,9 +18,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 public class ResultCollector extends AbstractBehavior<ResultCollector.Message> {
 
@@ -72,8 +70,6 @@ public class ResultCollector extends AbstractBehavior<ResultCollector.Message> {
 
 	private final BufferedWriter writer;
 
-	private Set<InclusionDependency> dependencies = new HashSet<>();
-
 	////////////////////
 	// Actor Behavior //
 	////////////////////
@@ -87,21 +83,19 @@ public class ResultCollector extends AbstractBehavior<ResultCollector.Message> {
 				.build();
 	}
 
-	private Behavior<Message> handle(ResultMessage message) {
+	private Behavior<Message> handle(ResultMessage message) throws IOException {
 		this.getContext().getLog().info("Received {} INDs!", message.getInclusionDependencies().size());
 
-		this.dependencies.addAll(message.getInclusionDependencies());
+		for (InclusionDependency ind : message.getInclusionDependencies()) {
+			this.writer.write(ind.toString());
+			this.writer.newLine();
+		}
 
 		return this;
 	}
 
 	private Behavior<Message> handle(FinalizeMessage message) throws IOException {
 		this.getContext().getLog().info("Received FinalizeMessage!");
-
-		for (InclusionDependency ind : this.dependencies) {
-			this.writer.write(ind.toString());
-			this.writer.newLine();
-		}
 
 		this.writer.flush();
 		this.getContext().getSystem().unsafeUpcast().tell(new Guardian.ShutdownMessage());

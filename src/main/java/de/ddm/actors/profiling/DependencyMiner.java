@@ -294,7 +294,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             int newReferencedFileId = this.taskFactory.nextReferencedFileId();
             this.actorRefToFileMap.put(dependencyWorker, newReferencedFileId);
             if (this.taskFactory.hasNextTaskByReferencedFile(newReferencedFileId)) {
-                dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(newReferencedFileId));
+                DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(newReferencedFileId);
+                this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
+                dependencyWorker.tell(taskMessage);
             }
             return this;
         } else {
