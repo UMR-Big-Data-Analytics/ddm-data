@@ -105,7 +105,12 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
                 .onMessage(ReceptionistListingMessage.class, this::handle)
                 .onMessage(TaskMessage.class, this::handle)
                 .onMessage(DataMessage.class, this::handle)
+                .onMessage(ShutdownMessage.class, this::handle)
                 .build();
+    }
+
+    private Behavior<Message> handle(ShutdownMessage shutdownMessage) {
+        return Behaviors.stopped();
     }
 
     private Behavior<Message> handle(ReceptionistListingMessage message) {
