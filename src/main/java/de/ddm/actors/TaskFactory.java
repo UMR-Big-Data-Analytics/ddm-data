@@ -9,71 +9,62 @@ import java.util.*;
 
 public class TaskFactory {
     public interface InclusionDependencyMapper {
-        InclusionDependency map(int referencedFileId, int referencedColumnId, int dependentFileId,
-                                int dependentColumnId);
+        InclusionDependency map(ColumnId referencedColumnId, ColumnId dependentColumnId);
     }
 
     private final String[][][] contents;
     Map<TaskId, Integer> taskTrackerMap = new HashMap<>();
 
-    public List<InclusionDependency> handleCompletionMessage(DependencyMiner.CompletionMessage completionMessage,
+    public InclusionDependency handleCompletionMessage(DependencyMiner.CompletionMessage completionMessage,
                                                              InclusionDependencyMapper mapper) {
-        List<InclusionDependency> inclusionDependencies = new ArrayList<>();
-        for (int i = 0; i < contents[completionMessage.getReferencedFileId()].length; i++) {
 
-            TaskId taskId = new TaskId(completionMessage.getReferencedFileId(),
-                    completionMessage.getMaybeDependentFileId(), i,
-                    completionMessage.getMaybeDependentColumnId());
+        TaskId taskId = new TaskId(completionMessage.getReferencedColumnId(),
+                completionMessage.getDependentColumnId());
 
-            if (completionMessage.getReferencedColumnCandidates().contains(i)) {
-                Integer integer = taskTrackerMap.remove(taskId);
-                if (integer != null) {
-                    int newValue = integer - 1;
-                    if (newValue == 0) {
-                        inclusionDependencies.add(mapper.map(taskId.referencedFileId, taskId.referencedFileColumnId,
-                                taskId.dependentFileId, taskId.dependentFileColumnId));
-                        // we got an inclusion dependency
-                    } else {
-                        taskTrackerMap.put(taskId, newValue);
-                    }
-
+        if (completionMessage.isCandidate()) {
+            Integer integer = taskTrackerMap.remove(taskId);
+            if (integer != null) {
+                int newValue = integer - 1;
+                if (newValue == 0) {
+                    return mapper.map(taskId.referencedColumn, taskId.dependentColumn);
+                    // we got an inclusion dependency
+                } else {
+                    taskTrackerMap.put(taskId, newValue);
                 }
-            } else {
-                taskTrackerMap.remove(taskId);
             }
+        } else {
+            taskTrackerMap.remove(taskId);
         }
 
-        return inclusionDependencies;
+        return null;
     }
 
     class TaskCounter implements Iterator<DependencyWorker.TaskMessage> {
-        int referencedFileId;
-        int nextDependentColumnIndex;
+        ColumnId referencedColumnId;
         int nextBatchStartIndex;
 
-        final int BATCH_SIZE = 10000;
+        final int BATCH_SIZE = 30000;
 
         Queue<DependencyWorker.TaskMessage> failedTasks = new LinkedList<>();
-        Queue<Integer> remainingDependentFileIds = new LinkedList<>();
+        Queue<ColumnId> remainingDependentColumnIds = new LinkedList<>();
 
         DependencyWorker.TaskMessage nextMessage;
 
-        public TaskCounter(int referencedFileId) {
-            this.referencedFileId = referencedFileId;
-            this.nextDependentColumnIndex = 0;
+        public TaskCounter(ColumnId referencedColumnId) {
+            this.referencedColumnId = referencedColumnId;
             this.nextBatchStartIndex = 0;
             this.nextMessage = computeNext();
         }
 
-        public void addDependentFile(int dependentFileId) {
-            if (this.referencedFileId != dependentFileId) {
-                this.remainingDependentFileIds.offer(dependentFileId);
+        public void addDependentColumn(ColumnId dependendColumnId) {
+            if (this.referencedColumnId.isDifferentFile(dependendColumnId)) {
+                this.remainingDependentColumnIds.offer(dependendColumnId);
             }
         }
 
         @Override
         public boolean hasNext() {
-            if(nextMessage == null) {
+            if (nextMessage == null) {
                 nextMessage = computeNext();
             }
             return nextMessage != null;
@@ -91,50 +82,43 @@ public class TaskFactory {
                 return failedTasks.poll();
             }
 
-            if(this.remainingDependentFileIds.isEmpty()) {
+            if (this.remainingDependentColumnIds.isEmpty()) {
                 return null;
             }
 
             DependencyWorker.TaskMessage nextTaskMessage;
 
-            int currentDependentFileId = this.remainingDependentFileIds.peek();
+            ColumnId currentDependentColumnId = this.remainingDependentColumnIds.peek();
 
-            String[] dependentColumn = contents[currentDependentFileId][this.nextDependentColumnIndex];
+            String[] dependentColumn = contents[currentDependentColumnId.getFileId()][currentDependentColumnId.getColumnId()];
             int dependentColumnSize = dependentColumn.length;
 
-            List<Integer> candidateColumns = new ArrayList<>();
+            boolean isCandidate = false;
 
             int batchCount = (int) Math.ceil((double) dependentColumnSize / BATCH_SIZE);
-            for (int i = 0; i < contents[this.referencedFileId].length; i++) {
-                TaskId taskId = new TaskId(this.referencedFileId, currentDependentFileId, i,
-                        this.nextDependentColumnIndex);
-                if (nextBatchStartIndex == 0) {
-                    taskTrackerMap.put(taskId, batchCount);
-                }
-                if (taskTrackerMap.containsKey(taskId)) {
-                    candidateColumns.add(i);
-                }
+            TaskId taskId = new TaskId(this.referencedColumnId, currentDependentColumnId);
+            if (nextBatchStartIndex == 0) {
+                taskTrackerMap.put(taskId, batchCount);
+            }
+            if (taskTrackerMap.containsKey(taskId)) {
+                isCandidate = true;
             }
 
             int from = nextBatchStartIndex;
             int to = Math.min(nextBatchStartIndex + BATCH_SIZE, dependentColumnSize);
 
-            nextTaskMessage = new DependencyWorker.TaskMessage(dependencyMinerRef, this.referencedFileId,
-                    currentDependentFileId, this.nextDependentColumnIndex, from, to, candidateColumns);
+            nextTaskMessage = new DependencyWorker.TaskMessage(dependencyMinerRef, this.referencedColumnId,
+                    currentDependentColumnId, from, to);
 
             nextBatchStartIndex = to;
 
-            if (candidateColumns.isEmpty() || nextBatchStartIndex >= dependentColumnSize) {
-                this.nextDependentColumnIndex += 1;
+            if (!isCandidate || nextBatchStartIndex >= dependentColumnSize) {
                 nextBatchStartIndex = 0;
-                if (this.nextDependentColumnIndex >= fileToColumnCountMap.get(currentDependentFileId)) {
-                    this.nextDependentColumnIndex = 0;
-                    this.remainingDependentFileIds.poll(); // remove the file id
-                }
+                this.remainingDependentColumnIds.poll(); // remove the column id
             }
 
-            if(candidateColumns.isEmpty()) {
-               nextTaskMessage = this.computeNext();
+            if (!isCandidate) {
+                nextTaskMessage = this.computeNext();
             }
 
             return nextTaskMessage;
@@ -143,11 +127,9 @@ public class TaskFactory {
 
     private final ActorRef<DependencyMiner.Message> dependencyMinerRef;
 
-    Map<Integer, Integer> fileToColumnCountMap = new HashMap<>();
-    Map<Integer, TaskCounter> fileToTaskCounter = new HashMap<>();
+    Map<ColumnId, TaskCounter> columnToTaskCounter = new HashMap<>();
 
-
-    Queue<Integer> nextReferencedFileId = new LinkedList<>();
+    Queue<ColumnId> nextReferencedColumnId = new LinkedList<>();
 
     public TaskFactory(ActorRef<DependencyMiner.Message> dependencyMinerRef, String[][][] contents) {
         this.dependencyMinerRef = dependencyMinerRef;
@@ -155,48 +137,50 @@ public class TaskFactory {
     }
 
     public void addFile(int fileId, int columns) {
-        // add new file id to all existing task counters
-        for (TaskCounter tc : this.fileToTaskCounter.values()) {
-            tc.addDependentFile(fileId);
+        for(int i=0; i < columns; i++) {
+            ColumnId columnId = new ColumnId(fileId, i);
+            // add new file id to all existing task counters
+            for (TaskCounter tc : this.columnToTaskCounter.values()) {
+                tc.addDependentColumn(columnId);
+            }
+            // create new task counter for new file and add all existing file ids
+            TaskCounter taskCounter = new TaskCounter(columnId);
+            for (ColumnId dependentColumnId : this.columnToTaskCounter.keySet()) {
+                taskCounter.addDependentColumn(dependentColumnId);
+            }
+            this.columnToTaskCounter.put(columnId, taskCounter);
+            // reset referencedFileId queue when there is a new file
+            this.nextReferencedColumnId.clear();
+            this.nextReferencedColumnId.addAll(this.columnToTaskCounter.keySet());
         }
-        // create new task counter for new file and add all existing file ids
-        TaskCounter taskCounter = new TaskCounter(fileId);
-        for (int dependentFileId : this.fileToTaskCounter.keySet()) {
-            taskCounter.addDependentFile(dependentFileId);
-        }
-        this.fileToColumnCountMap.put(fileId, columns);
-        this.fileToTaskCounter.put(fileId, taskCounter);
-        // reset referencedFileId queue when there is a new file
-        this.nextReferencedFileId.clear();
-        this.nextReferencedFileId.addAll(this.fileToTaskCounter.keySet());
     }
 
-    public boolean hasNextTaskByReferencedFile(int referencedFileId) {
-        return this.fileToTaskCounter.get(referencedFileId).hasNext();
+    public boolean hasNextTaskByReferencedColumn(ColumnId columnId) {
+        return this.columnToTaskCounter.get(columnId).hasNext();
     }
 
-    public DependencyWorker.TaskMessage nextTaskByReferencedFile(int referencedFileId) {
-        DependencyWorker.TaskMessage message = this.fileToTaskCounter.get(referencedFileId).next();
-        if (!hasNextTaskByReferencedFile(referencedFileId)) {
-            nextReferencedFileId.remove(referencedFileId);
+    public DependencyWorker.TaskMessage nextTaskByReferencedFile(ColumnId columnId) {
+        DependencyWorker.TaskMessage message = this.columnToTaskCounter.get(columnId).next();
+        if (!hasNextTaskByReferencedColumn(columnId)) {
+            nextReferencedColumnId.remove(columnId);
         }
         return message;
     }
 
     public boolean hasWork() {
-        return this.nextReferencedFileId.stream().anyMatch((id) -> this.fileToTaskCounter.get(id).hasNext());
+        return this.nextReferencedColumnId.stream().anyMatch((id) -> this.columnToTaskCounter.get(id).hasNext());
     }
 
-    public Integer nextReferencedFileId() {
-        Integer nextId = this.nextReferencedFileId.poll();
-        this.nextReferencedFileId.offer(nextId);
+    public ColumnId nextReferencedColumnId() {
+        ColumnId nextId = this.nextReferencedColumnId.poll();
+        this.nextReferencedColumnId.offer(nextId);
         return nextId;
     }
 
     public void addFailedTask(DependencyWorker.TaskMessage taskMessage) {
-        if (!this.nextReferencedFileId.contains(taskMessage.getReferencedFileId())) {
-            this.nextReferencedFileId.offer(taskMessage.getReferencedFileId());
+        if (!this.nextReferencedColumnId.contains(taskMessage.getReferencedColumnId())) {
+            this.nextReferencedColumnId.offer(taskMessage.getReferencedColumnId());
         }
-        this.fileToTaskCounter.get(taskMessage.getReferencedFileId()).failedTasks.offer(taskMessage);
+        this.columnToTaskCounter.get(taskMessage.getReferencedColumnId()).failedTasks.offer(taskMessage);
     }
 }
