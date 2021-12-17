@@ -26,7 +26,7 @@ public class TaskFactory {
                     completionMessage.getMaybeDependentColumnId());
 
             if (completionMessage.getReferencedColumnCandidates().contains(i)) {
-                Integer integer = taskTrackerMap.get(taskId);
+                Integer integer = taskTrackerMap.remove(taskId);
                 if (integer != null) {
                     int newValue = integer - 1;
                     if (newValue == 0) {
@@ -56,10 +56,13 @@ public class TaskFactory {
         Queue<DependencyWorker.TaskMessage> failedTasks = new LinkedList<>();
         Queue<Integer> remainingDependentFileIds = new LinkedList<>();
 
+        DependencyWorker.TaskMessage nextMessage;
+
         public TaskCounter(int referencedFileId) {
             this.referencedFileId = referencedFileId;
             this.nextDependentColumnIndex = 0;
             this.nextBatchStartIndex = 0;
+            this.nextMessage = computeNext();
         }
 
         public void addDependentFile(int dependentFileId) {
@@ -70,13 +73,26 @@ public class TaskFactory {
 
         @Override
         public boolean hasNext() {
-            return !this.remainingDependentFileIds.isEmpty() || !this.failedTasks.isEmpty();
+            if(nextMessage == null) {
+                nextMessage = computeNext();
+            }
+            return nextMessage != null;
         }
 
         @Override
         public DependencyWorker.TaskMessage next() {
+            DependencyWorker.TaskMessage result = this.nextMessage;
+            this.nextMessage = this.computeNext();
+            return result;
+        }
+
+        private DependencyWorker.TaskMessage computeNext() {
             if (!failedTasks.isEmpty()) {
                 return failedTasks.poll();
+            }
+
+            if(this.remainingDependentFileIds.isEmpty()) {
+                return null;
             }
 
             DependencyWorker.TaskMessage nextTaskMessage;
@@ -86,33 +102,39 @@ public class TaskFactory {
             String[] dependentColumn = contents[currentDependentFileId][this.nextDependentColumnIndex];
             int dependentColumnSize = dependentColumn.length;
 
-            if (nextBatchStartIndex == 0) {
-                int batchCount = (int) Math.ceil((double) dependentColumnSize / BATCH_SIZE);
-                for (int i = 0; i < contents[this.referencedFileId].length; i++) {
-                    TaskId taskId = new TaskId(this.referencedFileId, currentDependentFileId, i,
-                            this.nextDependentColumnIndex);
+            List<Integer> candidateColumns = new ArrayList<>();
+
+            int batchCount = (int) Math.ceil((double) dependentColumnSize / BATCH_SIZE);
+            for (int i = 0; i < contents[this.referencedFileId].length; i++) {
+                TaskId taskId = new TaskId(this.referencedFileId, currentDependentFileId, i,
+                        this.nextDependentColumnIndex);
+                if (nextBatchStartIndex == 0) {
                     taskTrackerMap.put(taskId, batchCount);
                 }
+                if (taskTrackerMap.containsKey(taskId)) {
+                    candidateColumns.add(i);
+                }
             }
-
-            // TODO potential for skipping useless work
 
             int from = nextBatchStartIndex;
             int to = Math.min(nextBatchStartIndex + BATCH_SIZE, dependentColumnSize);
 
             nextTaskMessage = new DependencyWorker.TaskMessage(dependencyMinerRef, this.referencedFileId,
-                    currentDependentFileId, this.nextDependentColumnIndex, from, to);
+                    currentDependentFileId, this.nextDependentColumnIndex, from, to, candidateColumns);
 
             nextBatchStartIndex = to;
 
-            if (nextBatchStartIndex >= dependentColumnSize) {
+            if (candidateColumns.isEmpty() || nextBatchStartIndex >= dependentColumnSize) {
                 this.nextDependentColumnIndex += 1;
                 nextBatchStartIndex = 0;
                 if (this.nextDependentColumnIndex >= fileToColumnCountMap.get(currentDependentFileId)) {
                     this.nextDependentColumnIndex = 0;
                     this.remainingDependentFileIds.poll(); // remove the file id
                 }
+            }
 
+            if(candidateColumns.isEmpty()) {
+               nextTaskMessage = this.computeNext();
             }
 
             return nextTaskMessage;

@@ -13,10 +13,7 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message> {
 
@@ -46,6 +43,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         int dependentFileColumnIndex;
         int dependentColumnFrom;
         int dependentColumnTo;
+        List<Integer> referencedFileColumnCandidates;
     }
 
     @Getter
@@ -101,12 +99,14 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
     private String[][] referencedFile = null;
-    private int nextReferencedColumnId = 0;
     private String[] dependentColumnPart = null;
     private int referencedFileId = -1;
     private int dependentFileId = -1;
     private int dependentFileColumnIndex = -1;
     List<Integer[]> dependencies = new ArrayList<>();
+    List<Integer> newReferencedColumnCandidates;
+    Queue<Integer> referencedColumnCandidates;
+
 
     ////////////////////
     // Actor Behavior //
@@ -138,10 +138,10 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         this.referencedFileId = message.referencedFileId;
         this.dependentFileId = message.dependentFileId;
         this.dependentFileColumnIndex = message.dependentFileColumnIndex;
+        this.referencedColumnCandidates = new LinkedList<>(message.referencedFileColumnCandidates);
 
-        this.nextReferencedColumnId = 0;
         this.dependencies = new ArrayList<>();
-        this.referencedColumnCandidates = new ArrayList<>();
+        this.newReferencedColumnCandidates = new ArrayList<>();
         // Request data from dependency miner
         getContext().getLog().info("TaskMessage: referencedFileId: " + this.referencedFileId + ", dependentFileId:" + this.dependentFileId + ", dependentFileColumnIndex: " + this.dependentFileColumnIndex);
         message.dependencyMiner.tell(new DependencyMiner.RequestDataMessage(this.largeMessageProxy,
@@ -151,10 +151,12 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         return this;
     }
 
-    List<Integer> referencedColumnCandidates;
+
 
     private Behavior<Message> handle(ProcessDataMessage message) {
-        String[] columnOfFile1 = this.referencedFile[this.nextReferencedColumnId];
+        int nextReferencedColumnId = referencedColumnCandidates.poll();
+
+        String[] columnOfFile1 = this.referencedFile[nextReferencedColumnId];
         //this.getContext().getLog().info("check {} <- {} ?", this.nextReferencedColumnId, this.dependentFileColumnIndex);
 
 
@@ -167,16 +169,16 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         }
 
         if (isDependencyCandidate) {
-            referencedColumnCandidates.add(this.nextReferencedColumnId);
+            newReferencedColumnCandidates.add(nextReferencedColumnId);
         }
 
-        this.nextReferencedColumnId += 1;
-        if (this.nextReferencedColumnId >= this.referencedFile.length) {
+
+        if (referencedColumnCandidates.isEmpty()) {
             LargeMessageProxy.LargeMessage completionMessage =
                     new DependencyMiner.CompletionMessage(this.getContext().getSelf(), this.dependentFileId,
-                            this.referencedFileId, this.dependentFileColumnIndex, this.referencedColumnCandidates);
+                            this.referencedFileId, this.dependentFileColumnIndex, this.newReferencedColumnCandidates);
 
-            this.getContext().getLog().info("column candidates {}", this.referencedColumnCandidates.toString());
+            this.getContext().getLog().info("column candidates {}", this.newReferencedColumnCandidates.toString());
 
             this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
                     message.getDependencyMinerLargeMessageProxy()));
