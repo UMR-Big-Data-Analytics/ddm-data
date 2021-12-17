@@ -43,6 +43,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         ColumnId dependentColumnId;
         int dependentColumnFrom;
         int dependentColumnTo;
+        int id;
     }
 
     @Getter
@@ -50,9 +51,12 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     @AllArgsConstructor
     public static class DataMessage implements Message {
         private static final long serialVersionUID = 2135984614102497577L;
+        ActorRef<DependencyMiner.Message> dependencyMiner;
+        ColumnId referencedColumnId;
+        ColumnId dependentColumnId;
         String[] referencedColumn;
         String[] maybeDependentColumnPart;
-        ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
+        int id;
     }
 
     @NoArgsConstructor
@@ -89,11 +93,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
-    private String[] referencedColumn = null;
-    private String[] dependentColumnPart = null;
-    private ColumnId referencedColumnId = null;
-    private ColumnId dependentColumnId = null;
-
+    private final Map<ColumnId, String[]> referencedColumnsContent = new HashMap<>();
 
     ////////////////////
     // Actor Behavior //
@@ -120,15 +120,16 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         this.getContext().getLog().info("Asking for work!");
         // I should probably know how to solve this task, but for now I just pretend some work...
 
-        boolean needReferencedColumnData = !message.getReferencedColumnId().equals(this.referencedColumnId);
-        this.referencedColumnId = message.getReferencedColumnId();
-        this.dependentColumnId = message.getDependentColumnId();
+        boolean isReferencedColumnCached = this.referencedColumnsContent.containsKey(message.getReferencedColumnId());
+        ColumnId referencedColumnId = message.getReferencedColumnId();
+        ColumnId dependentColumnId = message.getDependentColumnId();
 
         // Request data from dependency miner
-        getContext().getLog().info("TaskMessage: referencedColumnId: " + this.referencedColumnId + ", dependentColumnId:" + this.dependentColumnId.toString());
+        getContext().getLog().info("TaskMessage: referencedColumnId: " + referencedColumnId + ", " +
+                "dependentColumnId:" + dependentColumnId.toString());
         message.dependencyMiner.tell(new DependencyMiner.RequestDataMessage(this.largeMessageProxy,
-                needReferencedColumnData ? this.referencedColumnId : null, this.dependentColumnId,
-                message.dependentColumnFrom, message.dependentColumnTo));
+                referencedColumnId, dependentColumnId,
+                message.dependentColumnFrom, message.dependentColumnTo, isReferencedColumnCached, message.id));
 
         return this;
     }
@@ -137,24 +138,25 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         this.getContext().getLog().info("Working!");
 
         if (message.getReferencedColumn() != null) {
-            this.referencedColumn = message.getReferencedColumn();
+            this.referencedColumnsContent.put(message.getReferencedColumnId(), message.getReferencedColumn());
         }
-        this.dependentColumnPart = message.maybeDependentColumnPart;
+
+        String[] referencedColumn = this.referencedColumnsContent.get(message.getReferencedColumnId());
+        String[] dependentColumnPart = message.maybeDependentColumnPart;
 
         boolean isDependencyCandidate = true;
-        for (String s : this.dependentColumnPart) {
-            if (Arrays.binarySearch(this.referencedColumn, s) < 0) {
+        for (String s : dependentColumnPart) {
+            if (Arrays.binarySearch(referencedColumn, s) < 0) {
                 isDependencyCandidate = false;
                 break;
             }
         }
 
-        LargeMessageProxy.LargeMessage completionMessage =
-                new DependencyMiner.CompletionMessage(this.getContext().getSelf(), this.referencedColumnId,
-                        this.dependentColumnId, isDependencyCandidate);
+        DependencyMiner.CompletionMessage completionMessage =
+                new DependencyMiner.CompletionMessage(this.getContext().getSelf(), message.getReferencedColumnId(),
+                        message.getDependentColumnId(), isDependencyCandidate, message.id);
 
-        this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
-                message.getDependencyMinerLargeMessageProxy()));
+        message.getDependencyMiner().tell(completionMessage);
 
         return this;
     }

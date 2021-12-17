@@ -31,7 +31,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
     Map<ActorRef<DependencyWorker.Message>, ColumnId> actorRefToColumnMap = new HashMap<>();
-    Map<ActorRef<DependencyWorker.Message>, DependencyWorker.TaskMessage> actorRefToActorOccupationMap =
+    Map<ActorRef<DependencyWorker.Message>, List<DependencyWorker.TaskMessage>> actorRefToActorOccupationMap =
             new HashMap<>();
 
     String[][][] alternativeFileRepresentation;
@@ -84,6 +84,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ColumnId dependentColumnId;
         int dependentColumnFrom;
         int dependentColumnTo;
+        boolean isReferencedColumnCached;
+        int id;
     }
 
     @Getter
@@ -95,6 +97,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ColumnId referencedColumnId;
         ColumnId dependentColumnId;
         boolean isCandidate;
+        int id;
     }
 
     @NoArgsConstructor
@@ -140,8 +143,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.dependencyWorkers = new ArrayList<>();
 
-        this.unemployedDependencyWorkers = new ArrayList<>();
-
         context.getSystem().receptionist().tell(Receptionist.register(dependencyMinerService, context.getSelf()));
     }
 
@@ -162,8 +163,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
     private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
-
-    private final List<ActorRef<DependencyWorker.Message>> unemployedDependencyWorkers;
 
     ////////////////////
     // Actor Behavior //
@@ -233,16 +232,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         }
 
         for (ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
-            if (this.taskFactory.hasWork() && this.actorRefToActorOccupationMap.get(dependencyWorker) == null) {
-                ColumnId referencedColumnId = this.taskFactory.nextReferencedColumnId();
-
-                this.actorRefToColumnMap.put(dependencyWorker, referencedColumnId);
-                if (this.taskFactory.hasNextTaskByReferencedColumn(referencedColumnId)) {
-                    DependencyWorker.TaskMessage taskMessage =
-                            this.taskFactory.nextTaskByReferencedFile(referencedColumnId);
-                    this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
-                    dependencyWorker.tell(taskMessage);
-                }
+            if (this.actorRefToActorOccupationMap.get(dependencyWorker).isEmpty()) {
+                assignNextTask(dependencyWorker);
             }
         }
 
@@ -253,24 +244,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
         if (!this.dependencyWorkers.contains(dependencyWorker)) {
             this.dependencyWorkers.add(dependencyWorker);
+            this.actorRefToActorOccupationMap.put(dependencyWorker, new ArrayList<>());
             this.getContext().watch(dependencyWorker);
             // The worker should get some work ... let me send her something before I figure out what I actually want
             // from her.
             // I probably need to idle the worker for a while, if I do not have work for it right now ... (see
             // master/worker pattern)
 
-            this.actorRefToActorOccupationMap.put(dependencyWorker, null);
-
-            if (this.taskFactory.hasWork()) {
-                ColumnId referencedColumnId = this.taskFactory.nextReferencedColumnId();
-                this.actorRefToColumnMap.put(dependencyWorker, referencedColumnId);
-                if (this.taskFactory.hasNextTaskByReferencedColumn(referencedColumnId)) {
-                    DependencyWorker.TaskMessage taskMessage =
-                            this.taskFactory.nextTaskByReferencedFile(referencedColumnId);
-                    this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
-                    dependencyWorker.tell(taskMessage);
-                }
-            }
+            //this.actorRefToActorOccupationMap.put(dependencyWorker, null);
+            assignNextTask(dependencyWorker);
         }
 
         return this;
@@ -286,8 +268,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                     File referencedFile = this.inputFiles[referencedColumnId.getFileId()];
                     File dependentFile = this.inputFiles[dependentColumnId.getFileId()];
 
-                    String referencedAttribute = this.headerLines[referencedColumnId.getFileId()][referencedColumnId.getColumnId()];
-                    String dependentAttribute = this.headerLines[dependentColumnId.getFileId()][dependentColumnId.getColumnId()];
+                    String referencedAttribute =
+                            this.headerLines[referencedColumnId.getFileId()][referencedColumnId.getColumnId()];
+                    String dependentAttribute =
+                            this.headerLines[dependentColumnId.getFileId()][dependentColumnId.getColumnId()];
 
                     return new InclusionDependency(dependentFile, new String[]{dependentAttribute},
                             referencedFile, new String[]{referencedAttribute});
@@ -302,26 +286,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         // I still don't know what task the worker could help me to solve ... but let me keep her busy.
         // Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to
         // detect n-ary INDs as well!
-        ColumnId referencedColumnId = this.actorRefToColumnMap.get(dependencyWorker);
-        if (this.taskFactory.hasNextTaskByReferencedColumn(referencedColumnId)) {
-            dependencyWorker.tell(this.taskFactory.nextTaskByReferencedFile(referencedColumnId));
+
+        this.actorRefToActorOccupationMap.get(dependencyWorker).removeIf(taskMessage -> taskMessage.id == message.id);
+        if (assignNextTask(dependencyWorker)) {
             return this;
-        } else if (this.taskFactory.hasWork()) {
-            ColumnId newReferencedColumnId = this.taskFactory.nextReferencedColumnId();
-            this.actorRefToColumnMap.put(dependencyWorker, newReferencedColumnId);
-            if (this.taskFactory.hasNextTaskByReferencedColumn(newReferencedColumnId)) {
-                DependencyWorker.TaskMessage taskMessage =
-                        this.taskFactory.nextTaskByReferencedFile(newReferencedColumnId);
-                this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
-                dependencyWorker.tell(taskMessage);
-            }
-            return this;
-        } else {
-            this.actorRefToActorOccupationMap.put(dependencyWorker, null);
         }
 
         if (this.filereadCompletionMap.values().stream().allMatch((v) -> v)
-                && this.actorRefToActorOccupationMap.values().stream().allMatch(Objects::isNull)
+                && this.actorRefToActorOccupationMap.values().stream().allMatch(List::isEmpty)
                 && !this.taskFactory.hasWork()) {
             this.end();
         }
@@ -329,20 +301,40 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
+    private boolean assignNextTask(ActorRef<DependencyWorker.Message> dependencyWorker) {
+        ColumnId referencedColumnId = this.actorRefToColumnMap.get(dependencyWorker);
+        if (referencedColumnId != null && this.taskFactory.hasNextTaskByReferencedColumn(referencedColumnId)) {
+            DependencyWorker.TaskMessage taskMessage =
+                    this.taskFactory.nextTaskByReferencedFile(referencedColumnId);
+            dependencyWorker.tell(taskMessage);
+            this.actorRefToActorOccupationMap.get(dependencyWorker).add(taskMessage);
+            return true;
+        } else if (this.taskFactory.hasWork()) {
+            ColumnId newReferencedColumnId = this.taskFactory.nextReferencedColumnId();
+            this.actorRefToColumnMap.put(dependencyWorker, newReferencedColumnId);
+            DependencyWorker.TaskMessage taskMessage =
+                    this.taskFactory.nextTaskByReferencedFile(newReferencedColumnId);
+            this.actorRefToActorOccupationMap.get(dependencyWorker).add(taskMessage);
+            dependencyWorker.tell(taskMessage);
+            return true;
+        }
+
+        return false;
+    }
+
     private Behavior<Message> handle(RequestDataMessage message) {
         ActorRef<LargeMessageProxy.Message> receiverProxy = message.dependencyWorkerReceiverProxy;
 
-        this.getContext().getLog().info("Requesting Data {}", receiverProxy.toString());
-
-        String[] referencedColumn = message.referencedColumnId == null ? null :
+        String[] referencedColumn = message.isReferencedColumnCached() ? null :
                 this.alternativeFileRepresentation[message.getReferencedColumnId().getFileId()][message.getReferencedColumnId().getColumnId()];
-        String[] maybeDependentColumnPart =
+        String[] dependentColumnPart =
                 Arrays.copyOfRange(this.alternativeFileRepresentation[message.getDependentColumnId().getFileId()][message.getDependentColumnId().getColumnId()],
                         message.dependentColumnFrom, message.dependentColumnTo);
 
-        LargeMessageProxy.LargeMessage largeMessage = new DependencyWorker.DataMessage(referencedColumn,
-                maybeDependentColumnPart,
-                this.largeMessageProxy);
+        LargeMessageProxy.LargeMessage largeMessage = new DependencyWorker.DataMessage(getContext().getSelf(),
+                message.getReferencedColumnId(), message.getDependentColumnId(),
+                referencedColumn,
+                dependentColumnPart, message.id);
         this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(largeMessage, receiverProxy));
 
         return this;
@@ -357,20 +349,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private Behavior<Message> handle(Terminated signal) {
         ActorRef<DependencyWorker.Message> dependencyWorker = signal.getRef().unsafeUpcast();
         this.getContext().getLog().error("Actor {} has terminated", dependencyWorker);
-        DependencyWorker.TaskMessage taskMessage = this.actorRefToActorOccupationMap.remove(dependencyWorker);
+        List<DependencyWorker.TaskMessage> taskMessages = this.actorRefToActorOccupationMap.remove(dependencyWorker);
         this.actorRefToColumnMap.remove(dependencyWorker);
         this.dependencyWorkers.remove(dependencyWorker);
 
-        boolean addToTaskFactory = true;
-        for (ActorRef<DependencyWorker.Message> worker : this.dependencyWorkers) {
-            if (this.actorRefToActorOccupationMap.get(worker) == null) {
-                worker.tell(taskMessage);
-                addToTaskFactory = false;
-                break;
+        for (DependencyWorker.TaskMessage taskMessage : taskMessages) {
+            boolean addToTaskFactory = true;
+            for (ActorRef<DependencyWorker.Message> worker : this.dependencyWorkers) {
+                if (this.actorRefToActorOccupationMap.get(worker).isEmpty()) {
+                    worker.tell(taskMessage);
+                    addToTaskFactory = false;
+                    break;
+                }
             }
-        }
-        if (addToTaskFactory) {
-            this.taskFactory.addFailedTask(taskMessage);
+            if (addToTaskFactory) {
+                this.taskFactory.addFailedTask(taskMessage);
+            }
         }
         return this;
     }

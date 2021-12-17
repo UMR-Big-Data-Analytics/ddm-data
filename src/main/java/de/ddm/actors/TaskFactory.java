@@ -108,7 +108,7 @@ public class TaskFactory {
             int to = Math.min(nextBatchStartIndex + BATCH_SIZE, dependentColumnSize);
 
             nextTaskMessage = new DependencyWorker.TaskMessage(dependencyMinerRef, this.referencedColumnId,
-                    currentDependentColumnId, from, to);
+                    currentDependentColumnId, from, to, nextUniqueId++);
 
             nextBatchStartIndex = to;
 
@@ -124,6 +124,8 @@ public class TaskFactory {
             return nextTaskMessage;
         }
     }
+
+    private int nextUniqueId = 0;
 
     private final ActorRef<DependencyMiner.Message> dependencyMinerRef;
 
