@@ -31,9 +31,7 @@ public class LargeMessageProxy extends AbstractBehavior<LargeMessageProxy.Messag
 
     @JsonTypeInfo(use = JsonTypeInfo.Id.NAME)
     @JsonSubTypes({
-            @JsonSubTypes.Type(value = DependencyWorker.DataMessage.class, name = "DataMessage"),
-
-            @JsonSubTypes.Type(value = DependencyMiner.CompletionMessage.class, name = "CompletionMessage")}
+            @JsonSubTypes.Type(value = DependencyWorker.DataMessage.class, name = "DataMessage")}
     )
     public interface LargeMessage extends AkkaSerializable {
     }
@@ -217,13 +215,15 @@ public class LargeMessageProxy extends AbstractBehavior<LargeMessageProxy.Messag
         receiveState.setOffset(offset + message.getBytes().length);
 
         if (receiveState.getOffset() != bytes.length) {
-            receiveState.getSenderProxy().tell(new BytesAckMessage(message.getSenderTransmissionKey(), message.getReceiverTransmissionKey()));
+            receiveState.getSenderProxy().tell(new BytesAckMessage(message.getSenderTransmissionKey(),
+                    message.getReceiverTransmissionKey()));
             return this;
         }
 
         this.pendingReceives.remove(message.getReceiverTransmissionKey());
 
-        LargeMessage largeMessage = (LargeMessage) this.serialization.deserialize(bytes, receiveState.getSerializerId(), receiveState.getManifest()).get();
+        LargeMessage largeMessage = (LargeMessage) this.serialization.deserialize(bytes,
+                receiveState.getSerializerId(), receiveState.getManifest()).get();
 
         this.parent.tell(largeMessage);
         return this;

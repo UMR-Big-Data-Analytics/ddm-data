@@ -138,6 +138,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         this.getContext().getLog().info("Working!");
 
         if (message.getReferencedColumn() != null) {
+            this.referencedColumnsContent.clear();
             this.referencedColumnsContent.put(message.getReferencedColumnId(), message.getReferencedColumn());
         }
 
