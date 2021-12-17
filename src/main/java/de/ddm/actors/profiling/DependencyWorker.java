@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
@@ -43,6 +44,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         int referencedFileId;
         int dependentFileId;
         int dependentFileColumnIndex;
+        int dependentColumnFrom;
+        int dependentColumnTo;
     }
 
     @Getter
@@ -50,8 +53,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     @AllArgsConstructor
     public static class DataMessage implements Message {
         private static final long serialVersionUID = 2135984614102497577L;
-        List<Set<String>> referencedFile;
-        Set<String> maybeDependentColumn;
+        String[][] referencedFile;
+        String[] maybeDependentColumnPart;
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
     }
 
@@ -97,9 +100,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
-    private List<Set<String>> referencedFile = null;
+    private String[][] referencedFile = null;
     private int nextReferencedColumnId = 0;
-    private Set<String> dependentColumn = null;
+    private String[] dependentColumnPart = null;
     private int referencedFileId = -1;
     private int dependentFileId = -1;
     private int dependentFileColumnIndex = -1;
@@ -138,26 +141,43 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
         this.nextReferencedColumnId = 0;
         this.dependencies = new ArrayList<>();
+        this.referencedColumnCandidates = new ArrayList<>();
         // Request data from dependency miner
         getContext().getLog().info("TaskMessage: referencedFileId: " + this.referencedFileId + ", dependentFileId:" + this.dependentFileId + ", dependentFileColumnIndex: " + this.dependentFileColumnIndex);
         message.dependencyMiner.tell(new DependencyMiner.RequestDataMessage(this.largeMessageProxy,
                 needReferencedFileData ? this.referencedFileId : -1, this.dependentFileId,
-                this.dependentFileColumnIndex));
+                this.dependentFileColumnIndex, message.dependentColumnFrom, message.dependentColumnTo));
 
         return this;
     }
 
+    List<Integer> referencedColumnCandidates;
+
     private Behavior<Message> handle(ProcessDataMessage message) {
-        Set<String> columnOfFile1 = this.referencedFile.get(this.nextReferencedColumnId);
-        this.getContext().getLog().info("check {} <- {} ?", this.nextReferencedColumnId, this.dependentFileColumnIndex);
-        if (columnOfFile1.containsAll(this.dependentColumn)) {
-            this.dependencies.add(new Integer[]{this.nextReferencedColumnId, this.dependentFileColumnIndex});
+        String[] columnOfFile1 = this.referencedFile[this.nextReferencedColumnId];
+        //this.getContext().getLog().info("check {} <- {} ?", this.nextReferencedColumnId, this.dependentFileColumnIndex);
+
+
+        boolean isDependencyCandidate = true;
+        for (String s : this.dependentColumnPart) {
+            if (Arrays.binarySearch(columnOfFile1, s) < 0) {
+                isDependencyCandidate = false;
+                break;
+            }
         }
+
+        if (isDependencyCandidate) {
+            referencedColumnCandidates.add(this.nextReferencedColumnId);
+        }
+
         this.nextReferencedColumnId += 1;
-        if (this.nextReferencedColumnId >= this.referencedFile.size()) {
+        if (this.nextReferencedColumnId >= this.referencedFile.length) {
             LargeMessageProxy.LargeMessage completionMessage =
-                    new DependencyMiner.CompletionMessage(this.getContext().getSelf(), this.dependencies,
-                            this.dependentFileId);
+                    new DependencyMiner.CompletionMessage(this.getContext().getSelf(), this.dependentFileId,
+                            this.referencedFileId, this.dependentFileColumnIndex, this.referencedColumnCandidates);
+
+            this.getContext().getLog().info("column candidates {}", this.referencedColumnCandidates.toString());
+
             this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage,
                     message.getDependencyMinerLargeMessageProxy()));
         } else {
@@ -173,7 +193,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         if (message.referencedFile != null) {
             this.referencedFile = message.referencedFile;
         }
-        this.dependentColumn = message.maybeDependentColumn;
+        this.dependentColumnPart = message.maybeDependentColumnPart;
 
         getContext().getSelf().tell(new ProcessDataMessage(message.dependencyMinerLargeMessageProxy));
 

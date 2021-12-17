@@ -30,7 +30,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     Map<Integer, List<Set<String>>> fileidToContentMap = new HashMap<>();
     Map<Integer, Boolean> filereadCompletionMap = new HashMap<>();
     Map<ActorRef<DependencyWorker.Message>, Integer> actorRefToFileMap = new HashMap<>();
-    Map<ActorRef<DependencyWorker.Message>, DependencyWorker.TaskMessage> actorRefToActorOccupationMap = new HashMap<>();
+    Map<ActorRef<DependencyWorker.Message>, DependencyWorker.TaskMessage> actorRefToActorOccupationMap =
+            new HashMap<>();
+
+    String[][][] alternativeFileRepresentation;
 
     ////////////////////
     // Actor Messages //
@@ -79,6 +82,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         int referencedFileId;
         int maybeDependentFileId;
         int maybeDependentColumnIndex;
+        int maybeDependentColumnFrom;
+        int maybeDependentColumnTo;
     }
 
     @Getter
@@ -87,8 +92,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     public static class CompletionMessage implements Message {
         private static final long serialVersionUID = -7642425159675583598L;
         ActorRef<DependencyWorker.Message> dependencyWorker;
-        List<Integer[]> dependencies;
         int maybeDependentFileId;
+        int referencedFileId;
+        int maybeDependentColumnId;
+        List<Integer> referencedColumnCandidates;
     }
 
     @NoArgsConstructor
@@ -115,7 +122,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
         this.headerLines = new String[this.inputFiles.length][];
 
-        this.taskFactory = new TaskFactory(this.getContext().getSelf());
+        this.alternativeFileRepresentation = new String[this.inputFiles.length][][];
+
+        this.taskFactory = new TaskFactory(this.getContext().getSelf(), alternativeFileRepresentation);
 
         this.inputReaders = new ArrayList<>(inputFiles.length);
         for (int id = 0; id < this.inputFiles.length; id++) {
@@ -210,6 +219,16 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
         } else {
             filereadCompletionMap.put(message.id, true);
+
+            List<Set<String>> columns = fileidToContentMap.get(message.id);
+            alternativeFileRepresentation[message.id] = new String[columns.size()][];
+            for (int i = 0; i < columns.size(); i++) {
+                String[] column = columns.get(i).toArray(new String[0]);
+                Arrays.sort(column);
+                alternativeFileRepresentation[message.id][i] = column;
+            }
+
+
             this.getContext().getLog().info("File {} complete", message.id);
             this.taskFactory.addFile(message.id, this.fileidToContentMap.get(message.id).size());
         }
@@ -220,7 +239,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
-                    DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(referencedFileId);
+                    DependencyWorker.TaskMessage taskMessage =
+                            this.taskFactory.nextTaskByReferencedFile(referencedFileId);
                     this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
                     dependencyWorker.tell(taskMessage);
                 }
@@ -246,7 +266,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 int referencedFileId = this.taskFactory.nextReferencedFileId();
                 this.actorRefToFileMap.put(dependencyWorker, referencedFileId);
                 if (this.taskFactory.hasNextTaskByReferencedFile(referencedFileId)) {
-                    DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(referencedFileId);
+                    DependencyWorker.TaskMessage taskMessage =
+                            this.taskFactory.nextTaskByReferencedFile(referencedFileId);
                     this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
                     dependencyWorker.tell(taskMessage);
                 }
@@ -261,27 +282,23 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         // If this was a reasonable result, I would probably do something with it and potentially generate more work
         // ... for now, let's just generate a random, binary IND.
 
-        List<InclusionDependency> inds = new ArrayList<>(1);
+        List<InclusionDependency> inds = this.taskFactory.handleCompletionMessage(message,
+                (int referencedFileId, int referencedColumnId, int dependentFileId, int dependentColumnId) -> {
+                    File referencedFile = this.inputFiles[referencedFileId];
+                    File dependentFile = this.inputFiles[dependentFileId];
 
-        List<Integer[]> dependencies = message.dependencies;
+                    String referencedAttribute = this.headerLines[referencedFileId][referencedColumnId];
+                    String dependentAttribute = this.headerLines[dependentFileId][dependentColumnId];
 
-
-        File referencedFile = this.inputFiles[this.actorRefToFileMap.get(dependencyWorker)];
-        File dependentFile = this.inputFiles[message.maybeDependentFileId];
+                    return new InclusionDependency(dependentFile, new String[]{dependentAttribute},
+                            referencedFile, new String[]{referencedAttribute});
+                });
 
         getContext().getLog().info("CompletionMessage: dependentFileId: " + message.maybeDependentFileId);
 
-        for (Integer[] dependency : dependencies) {
-            String referencedAttribute = this.headerLines[this.actorRefToFileMap.get(dependencyWorker)][dependency[0]];
-            String dependentAttribute = this.headerLines[message.maybeDependentFileId][dependency[1]];
-
-            InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute},
-                    referencedFile, new String[]{referencedAttribute});
-
-            inds.add(ind);
+        if (!inds.isEmpty()) {
+            this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
         }
-
-        this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
 
         // I still don't know what task the worker could help me to solve ... but let me keep her busy.
         // Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to
@@ -294,7 +311,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             int newReferencedFileId = this.taskFactory.nextReferencedFileId();
             this.actorRefToFileMap.put(dependencyWorker, newReferencedFileId);
             if (this.taskFactory.hasNextTaskByReferencedFile(newReferencedFileId)) {
-                DependencyWorker.TaskMessage taskMessage = this.taskFactory.nextTaskByReferencedFile(newReferencedFileId);
+                DependencyWorker.TaskMessage taskMessage =
+                        this.taskFactory.nextTaskByReferencedFile(newReferencedFileId);
                 this.actorRefToActorOccupationMap.put(dependencyWorker, taskMessage);
                 dependencyWorker.tell(taskMessage);
             }
@@ -317,16 +335,16 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
         this.getContext().getLog().info("Requesting Data {}", receiverProxy.toString());
 
-        List<Set<String>> referencedFile = message.referencedFileId == -1 ? null :
-                this.fileidToContentMap.get(message.referencedFileId);
-        Set<String> maybeDependentColumn =
-                fileidToContentMap.get(message.getMaybeDependentFileId()).get(message.getMaybeDependentColumnIndex());
+        String[][] referencedFile = message.referencedFileId == -1 ? null :
+                this.alternativeFileRepresentation[(message.referencedFileId)];
+        String[] maybeDependentColumnPart =
+                Arrays.copyOfRange(this.alternativeFileRepresentation[message.getMaybeDependentFileId()][message.getMaybeDependentColumnIndex()], message.maybeDependentColumnFrom, message.maybeDependentColumnTo);
 
         //this.getContext().getLog().info("columns of file 1: {}", file1.size());
         //this.getContext().getLog().info("columns of file 2: {}", file2.size());
 
         LargeMessageProxy.LargeMessage largeMessage = new DependencyWorker.DataMessage(referencedFile,
-                maybeDependentColumn,
+                maybeDependentColumnPart,
                 this.largeMessageProxy);
         this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(largeMessage, receiverProxy));
 
@@ -347,14 +365,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.dependencyWorkers.remove(dependencyWorker);
 
         boolean addToTaskFactory = true;
-        for(ActorRef<DependencyWorker.Message> worker : this.dependencyWorkers) {
-            if(this.actorRefToActorOccupationMap.get(worker) == null) {
+        for (ActorRef<DependencyWorker.Message> worker : this.dependencyWorkers) {
+            if (this.actorRefToActorOccupationMap.get(worker) == null) {
                 worker.tell(taskMessage);
                 addToTaskFactory = false;
                 break;
             }
         }
-        if(addToTaskFactory) {
+        if (addToTaskFactory) {
             this.taskFactory.addFailedTask(taskMessage);
         }
         return this;
