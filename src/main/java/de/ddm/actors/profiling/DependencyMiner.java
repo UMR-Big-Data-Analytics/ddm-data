@@ -229,6 +229,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
             this.getContext().getLog().info("File {} complete", message.id);
             this.taskFactory.addFile(message.id, this.fileidToContentMap.get(message.id).size());
+
+            this.fileidToContentMap.remove(message.id);
         }
 
         for (ActorRef<DependencyWorker.Message> dependencyWorker : this.dependencyWorkers) {
