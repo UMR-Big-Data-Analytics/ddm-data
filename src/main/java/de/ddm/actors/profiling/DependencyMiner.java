@@ -109,7 +109,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final boolean discoverNaryDependencies;
     private final File[] inputFiles;
     private final String[][] headerLines;
-    private List<Table> tables;
+    private List<Table> tables = new ArrayList<>();
+    private final List<DependencyWorker.TaskMessage> taskList = new ArrayList<>();
     private final List<ActorRef<InputReader.Message>> inputReaders;
     private final ActorRef<ResultCollector.Message> resultCollector;
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
@@ -195,6 +196,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private void startMining() {
         this.getContext().getLog().info("Starting mining!");
+
+
+        taskDedication();
+    }
+
+    private void taskDedication() {
+
+
 
     }
 
