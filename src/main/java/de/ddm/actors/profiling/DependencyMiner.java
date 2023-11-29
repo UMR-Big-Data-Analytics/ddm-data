@@ -146,6 +146,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
+    private boolean allFilesHaveBeenRead(){
+        for (int i = 0; i < this.inputFiles.length; i++) {
+            if (this.headerLines[i] == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private Behavior<Message> handle(BatchMessage message) {
         this.getContext().getLog().info("Received batch of {} rows for file {}!", message.getBatch().size(), this.inputFiles[message.getId()].getName());
         List<String[]> batch = message.getBatch();
@@ -174,9 +183,21 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             }
         } else {
             this.getContext().getLog().info("Finished reading file {}!", this.inputFiles[message.getId()].getName());
+
+            if(allFilesHaveBeenRead()){
+                this.getContext().getLog().info("Finished reading all files! Mining will start!");
+                // Here we are telling the inputReader to read teh next batch
+                startMining();
+            }
         }
         return this;
     }
+
+    private void startMining() {
+        this.getContext().getLog().info("Starting mining!");
+
+    }
+
 
     private Behavior<Message> handle(RegistrationMessage message) {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
