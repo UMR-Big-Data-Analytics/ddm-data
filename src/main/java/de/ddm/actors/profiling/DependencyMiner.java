@@ -147,6 +147,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
+    //TODO : not sure if this is correct
     private boolean allFilesHaveBeenRead(){
         for (int i = 0; i < this.inputFiles.length; i++) {
             if (this.headerLines[i] == null) {
@@ -179,15 +180,15 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                         tables.get(message.getId()).getColumnsList().get(column).addValueToColumn(row[column]);
                     }
                 }
-                // here we are telling the inputReader to read teh next batch
+                // here we are telling the inputReader to read the next batch
                 this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
             }
         } else {
             this.getContext().getLog().info("Finished reading file {}!", this.inputFiles[message.getId()].getName());
 
-            if(allFilesHaveBeenRead()){
+            if(allFilesHaveBeenRead()) {
                 this.getContext().getLog().info("Finished reading all files! Mining will start!");
-                // Here we are telling the inputReader to read teh next batch
+                // Here we are telling the inputReader to read the next batch
                 startMining();
             }
         }
@@ -196,13 +197,24 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private void startMining() {
         this.getContext().getLog().info("Starting mining!");
-
-
-        taskDedication();
+        // Starting at table 1 not 0 because we are comparing the first table with the second table
+        for (int i = 1; i < tables.size(); i++) {
+            for(int j = 0; j < tables.get(j).amountOfColumns(); j++)
+            taskDedication(tables.get(j).getColumnsList(), tables.get(i));
+        }
     }
 
-    private void taskDedication() {
+    private void taskDedication(List<de.ddm.actors.profiling.Column> Column, Table Table) {
 
+        taskList.add(
+                new DependencyWorker.TaskMessage(
+                        null,
+                        -1,
+                        Table.getIdNameOfDataset(),
+                        Column
+
+                )
+        );
 
 
     }
@@ -214,7 +226,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             this.dependencyWorkers.add(dependencyWorker);
             this.getContext().watch(dependencyWorker);
             // The worker should get some work ... let me send her something before I figure out what I actually want from her.
-            // I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
+            // I probably need to idle the worker for a while if I do not have work for it right now ... (see a master/worker pattern)
 
             dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
         }

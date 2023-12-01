@@ -4,7 +4,10 @@ import java.util.HashSet;
 
 public class Column {
     private int id;
+    //To make sure that the values are unique
     private HashSet<String> columnValues;
+
+
 
     Column(int id){
         this.id = id;
