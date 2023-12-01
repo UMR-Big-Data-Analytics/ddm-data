@@ -224,11 +224,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
         if (!this.dependencyWorkers.contains(dependencyWorker)) {
             this.dependencyWorkers.add(dependencyWorker);
-            this.getContext().watch(dependencyWorker);
+
             // The worker should get some work ... let me send her something before I figure out what I actually want from her.
             // I probably need to idle the worker for a while if I do not have work for it right now ... (see a master/worker pattern)
 
-            dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
         }
         return this;
     }
@@ -254,7 +253,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         // I still don't know what task the worker could help me to solve ... but let me keep her busy.
         // Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 
-        dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
 
         // At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
         if (System.currentTimeMillis() - this.startTime > 2000000)
