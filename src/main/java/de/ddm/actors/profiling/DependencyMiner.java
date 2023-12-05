@@ -98,6 +98,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.largeMessageProxy = this.getContext().spawn(LargeMessageProxy.create(this.getContext().getSelf().unsafeUpcast()), LargeMessageProxy.DEFAULT_NAME);
 
         this.dependencyWorkers = new ArrayList<>();
+        this.allFilesHaveBeenRead = new boolean[this.inputFiles.length];
         context.getSystem().receptionist().tell(Receptionist.register(dependencyMinerService, context.getSelf()));
     }
 
@@ -110,6 +111,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final boolean discoverNaryDependencies;
     private final File[] inputFiles;
     private final String[][] headerLines;
+    private final boolean[] allFilesHaveBeenRead;
     // CompositeKey the first key is the name of the file and the second key is the name of the column
     private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
     private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
@@ -153,8 +155,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     //TODO : not sure if this is correct
     private boolean allFilesHaveBeenRead() {
-        for (int i = 0; i < this.inputFiles.length; i++) {
-            if (this.headerLines[i] == null) {
+        for (boolean b : this.allFilesHaveBeenRead) {
+            if (!b) {
                 return false;
             }
         }
@@ -181,7 +183,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             }
         } else {
             this.getContext().getLog().info("Finished reading file {}!", this.inputFiles[message.getId()].getName());
-
+            this.allFilesHaveBeenRead[message.getId()] = true;
             if (allFilesHaveBeenRead()) {
                 this.getContext().getLog().info("Finished reading all files! Mining will start!");
                 // Here we are telling the inputReader to read the next batch
@@ -201,7 +203,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     }
 
     private void startMining() {
-
+            this.getContext().getLog().info("Starting mining!");
 
     }
 
