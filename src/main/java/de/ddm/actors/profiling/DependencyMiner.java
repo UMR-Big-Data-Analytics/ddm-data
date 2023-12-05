@@ -62,6 +62,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     public static class RegistrationMessage implements Message {
         private static final long serialVersionUID = -4025238529984914107L;
         ActorRef<DependencyWorker.Message> dependencyWorker;
+        ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
     }
 
     @Getter
@@ -96,7 +97,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             this.inputReaders.add(context.spawn(InputReader.create(id, this.inputFiles[id]), InputReader.DEFAULT_NAME + "_" + id));
         this.resultCollector = context.spawn(ResultCollector.create(), ResultCollector.DEFAULT_NAME);
         this.largeMessageProxy = this.getContext().spawn(LargeMessageProxy.create(this.getContext().getSelf().unsafeUpcast()), LargeMessageProxy.DEFAULT_NAME);
-
+        this.dependencyWorkersLargeMessageProxy = new ArrayList<>();
         this.dependencyWorkers = new ArrayList<>();
         this.allFilesHaveBeenRead = new boolean[this.inputFiles.length];
         context.getSystem().receptionist().tell(Receptionist.register(dependencyMinerService, context.getSelf()));
@@ -112,11 +113,12 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final File[] inputFiles;
     private final String[][] headerLines;
     private final boolean[] allFilesHaveBeenRead;
+    private final List<ActorRef<LargeMessageProxy.Message>> dependencyWorkersLargeMessageProxy;
     // CompositeKey the first key is the name of the file and the second key is the name of the column
     private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
     private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
-
     private final List<DependencyWorker.TaskMessage> listOfTasks = new ArrayList<>();
+    private boolean allTasksHavebeenCreated = false;
 
     private final List<ActorRef<InputReader.Message>> inputReaders;
     private final ActorRef<ResultCollector.Message> resultCollector;
@@ -157,9 +159,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     //TODO : not sure if this is correct
     private boolean allFilesHaveBeenRead() {
         for (boolean b : this.allFilesHaveBeenRead) {
-            if (!b) {
+            if (!b)
                 return false;
-            }
         }
         return true;
     }
@@ -209,6 +210,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private void startMining() {
             this.getContext().getLog().info("Starting mining!");
             creatingTaskLists();
+            this.getContext().getLog().info("All task are now ready to be worked on {} tasks :)", this.listOfTasks.size());
+            allTasksHavebeenCreated = true;
     }
 
     private void creatingTaskLists() {
@@ -251,9 +254,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
         if (!this.dependencyWorkers.contains(dependencyWorker)) {
             this.dependencyWorkers.add(dependencyWorker);
-
-            // The worker should get some work ... let me send her something before I figure out what I actually want from her.
-            // I probably need to idle the worker for a while if I do not have work for it right now ... (see a master/worker pattern)
+            this.dependencyWorkersLargeMessageProxy.add(message.getDependencyMinerLargeMessageProxy());
 
         }
         return this;
