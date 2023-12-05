@@ -12,6 +12,7 @@ import de.ddm.serialization.AkkaSerializable;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 import java.util.HashMap;
 import java.util.Set;
@@ -34,9 +35,10 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     }
 
     @Getter
+    @Setter
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class TaskMessage implements Message {
+    public static class TaskMessage implements Message, LargeMessageProxy.LargeMessage {
         private static final long serialVersionUID = -4667745204456518160L;
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
         int taskId;
@@ -48,6 +50,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         String key4;
 
         boolean isStringColumn;
+
     }
 
     @Getter
@@ -57,6 +60,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         private static final long serialVersionUID = -4667745204456518160L;
         int taskId;
         Column column;
+        String key1;
+        String key2;
 
     }
 
@@ -121,10 +126,21 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
                         this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), true);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             }
-
-
+            findingIND();
         } else {
-
+            if (!columnOfNumbers.containsKey(new CompositeKey(message.getKey3(), message.getKey4()))) {
+                this.getContext().getLog().info("I am worker {} and I need column the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
+                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                        this.getContext().getSelf(), message.getTaskId(), message.getKey3(), message.getKey4(), false);
+                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            }
+            if (!columnOfNumbers.containsKey(new CompositeKey(message.getKey1(), message.getKey2()))) {
+                this.getContext().getLog().info("I am worker {} and I need column the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                        this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), false);
+                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            }
+            findingIND();
         }
 
         return this;
@@ -133,11 +149,15 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     private Behavior<Message> handle(ColumnReceiver message) {
 
         if (message.column.getType().equals("string")) {
-            this.columnOfStrings.put(new CompositeKey(message.column.getNameOfDataset(), message.column.getNameOfColumn()), message.column);
+            this.columnOfStrings.put(new CompositeKey(message.getKey1(), message.getKey2()), message.column);
         } else {
-            this.columnOfNumbers.put(new CompositeKey(message.column.getNameOfDataset(), message.column.getNameOfColumn()), message.column);
+            this.columnOfNumbers.put(new CompositeKey(message.getKey1(), message.getKey2()), message.column);
         }
 
         return this;
+    }
+
+    private void findingIND(){
+
     }
 }
