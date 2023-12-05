@@ -68,6 +68,18 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     @Getter
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class getNeededColumnMessage implements Message {
+        private static final long serialVersionUID = -4025238529984914107L;
+        ActorRef<DependencyWorker.Message> dependencyWorker;
+        int taskId;
+        String key1;
+        String key2;
+        boolean isString;
+    }
+
+    @Getter
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CompletionMessage implements Message {
         private static final long serialVersionUID = -7642425159675583598L;
         ActorRef<DependencyWorker.Message> dependencyWorker;
@@ -138,8 +150,23 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 .onMessage(HeaderMessage.class, this::handle)
                 .onMessage(RegistrationMessage.class, this::handle)
                 .onMessage(CompletionMessage.class, this::handle)
+                .onMessage(getNeededColumnMessage.class, this::handle)
                 .onSignal(Terminated.class, this::handle)
                 .build();
+    }
+
+    // This is for the dependencyWorker to ask for a column
+    private Behavior<Message> handle(getNeededColumnMessage getNeededColumnMessage) {
+        if (getNeededColumnMessage.isString) {
+                getNeededColumnMessage.
+                        getDependencyWorker().
+                        tell(new DependencyWorker.
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(),columnOfStrings.get(new CompositeKey(getNeededColumnMessage.getKey1(),getNeededColumnMessage.getKey2()))));
+
+        } else {
+                getNeededColumnMessage.getDependencyWorker().tell(new DependencyWorker.ColumnReceiver(getNeededColumnMessage.getTaskId(), columnOfNumbers.get(new CompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))));
+        }
+        return this;
     }
 
     private Behavior<Message> handle(StartMessage message) {
@@ -174,10 +201,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 for (String[] row : batch) {
                     if (row[column].matches("\\d+(-\\d+)*")) {
                         this.getContext().getLog().info("Adding new value to columnNumbers of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
-                        placingInBucket(message, column, row, columnOfNumbers,"number");
+                        placingInBucket(message, column, row, columnOfNumbers, "number");
                     } else {
                         this.getContext().getLog().info("Adding new value to columnStrings of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
-                        placingInBucket(message, column, row, columnOfStrings,"string");
+                        placingInBucket(message, column, row, columnOfStrings, "string");
                     }
                 }
                 // here we are telling the inputReader to read the next batch
@@ -196,28 +223,27 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     }
 
     private void placingInBucket(BatchMessage message, int column, String[] row, HashMap<CompositeKey, Column> columnOf, String type) {
-        if (columnOf.containsKey(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))){
-            this.getContext().getLog().info("Adding new value to column {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
+        if (columnOf.containsKey(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))) {
+            this.getContext().getLog().info("Adding new value to columnOf{} from file{} column {}!",type,this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]);
             columnOf.get((new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))).addValueToColumn(row[column]);
-        }
-        else {
-            columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column));
-            this.getContext().getLog().info("Adding new column{} to columnOf{} from file {}!", this.headerLines[message.id][column], type, this.inputFiles[message.getId()].getName());
+        } else {        // This is the key for the hashmap                                                                 // This is the new Column
+            columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column, type, this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]));
+            this.getContext().getLog().info("Adding new column {} to columnOf{} from file {}!", this.headerLines[message.id][column], type, this.inputFiles[message.getId()].getName());
             columnOf.get(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
         }
     }
 
     private void startMining() {
-            this.getContext().getLog().info("Starting mining!");
-            creatingTaskLists();
-            this.getContext().getLog().info("All task are now ready to be worked on {} tasks :)", this.listOfTasks.size());
-            allTasksHavebeenCreated = true;
+        this.getContext().getLog().info("Starting mining!");
+        creatingTaskLists();
+        this.getContext().getLog().info("All task are now ready to be worked on {} tasks :)", this.listOfTasks.size());
+        allTasksHavebeenCreated = true;
     }
 
     private void creatingTaskLists() {
         //This is for columnOfNumbers
-        for (CompositeKey key1 : columnOfNumbers.keySet()){
-            for (CompositeKey key2 : columnOfNumbers.keySet()){
+        for (CompositeKey key1 : columnOfNumbers.keySet()) {
+            for (CompositeKey key2 : columnOfNumbers.keySet()) {
                 if (!key1.equals(key2))
                     listOfTasks.add(
                             new DependencyWorker.TaskMessage(
@@ -231,8 +257,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             }
         }
         //This is for columnOfStrings
-        for (CompositeKey key1 : columnOfStrings.keySet()){
-            for (CompositeKey key2 : columnOfStrings.keySet()){
+        for (CompositeKey key1 : columnOfStrings.keySet()) {
+            for (CompositeKey key2 : columnOfStrings.keySet()) {
                 if (!key1.equals(key2))
                     listOfTasks.add(
                             new DependencyWorker.TaskMessage(
@@ -248,16 +274,24 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     }
 
 
-
-
     private Behavior<Message> handle(RegistrationMessage message) {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
         if (!this.dependencyWorkers.contains(dependencyWorker)) {
             this.dependencyWorkers.add(dependencyWorker);
             this.dependencyWorkersLargeMessageProxy.add(message.getDependencyMinerLargeMessageProxy());
+            this.getContext().watch(dependencyWorker);
 
+            if (allTasksHavebeenCreated) {
+                giveTasksToWorkers(dependencyWorker);
+            }
         }
         return this;
+    }
+
+    private void giveTasksToWorkers(ActorRef<DependencyWorker.Message> dependencyWorker) {
+        for (DependencyWorker.TaskMessage task : listOfTasks) {
+            dependencyWorker.tell(task);
+        }
     }
 
     private Behavior<Message> handle(CompletionMessage message) {

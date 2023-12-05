@@ -1,17 +1,25 @@
 package de.ddm.actors.profiling;
 
+import lombok.Getter;
+
 import java.util.HashSet;
 
 public class Column {
     private int id;
     //To make sure that the values are unique
     private HashSet<String> columnValues;
+    @Getter
+    private String nameOfDataset;
+    @Getter
+    private String nameOfColumn;
 
+    private String type;
 
-
-    Column(int id){
+    Column(int id, String type, String nameOfDataset, String nameOfColumn){
         this.id = id;
-        columnValues = new HashSet<>();
+        this.type = type;
+        this.nameOfColumn = nameOfColumn;
+        this.nameOfDataset = nameOfDataset;
     }
     void addValueToColumn(String value){
         columnValues.add(value);
@@ -27,6 +35,10 @@ public class Column {
 
     void addColumnValues(String columnValues){
         this.columnValues.add(columnValues);
+    }
+
+    public String getType() {
+    	return this.type;
     }
 
 }
