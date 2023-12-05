@@ -41,8 +41,12 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		private static final long serialVersionUID = -4667745204456518160L;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
 		int taskId;
-		int TableIdA;
-		List<de.ddm.actors.profiling.Column> columnA;
+		// for the first column
+		int key1;
+		int key2;
+		// for the second column
+		int key3;
+		int key4;
 	}
 
 	////////////////////////
@@ -69,6 +73,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	/////////////////
 
 	private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
+
 
 	////////////////////
 	// Actor Behavior //

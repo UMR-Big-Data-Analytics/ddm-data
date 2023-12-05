@@ -116,7 +116,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
     private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
 
-    private final List<DependencyWorker.TaskMessage> taskList = new ArrayList<>();
+    private final List<DependencyWorker.TaskMessage> listOfTasks = new ArrayList<>();
+
     private final List<ActorRef<InputReader.Message>> inputReaders;
     private final ActorRef<ResultCollector.Message> resultCollector;
     private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
@@ -207,20 +208,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     }
 
-    private void taskDedication(List<de.ddm.actors.profiling.Column> Column, Table Table) {
-
-        taskList.add(
-                new DependencyWorker.TaskMessage(
+    private void creatingTaskLists() {
+        for (int i = 0; i < this.headerLines.length; i++) {
+            for (int j = 0; j < this.headerLines[i].length; j++) {
+                listOfTasks.add( new DependencyWorker.TaskMessage(
                         null,
                         -1,
-                        Table.getIdNameOfDataset(),
-                        Column
-
-                )
-        );
-
-
+                        i,
+                        j,
+                        i + 1,
+                        j + 1)
+                );
+            }
+        }
     }
+
+
 
 
     private Behavior<Message> handle(RegistrationMessage message) {

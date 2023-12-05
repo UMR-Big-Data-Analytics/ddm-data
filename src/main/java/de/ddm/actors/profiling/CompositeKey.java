@@ -23,5 +23,13 @@ public class CompositeKey {
     public int hashCode() {
         return Objects.hash(key1, key2);
     }
+
+    public String getKey1() {
+    	return this.key1;
+    }
+
+    public String getKey2() {
+    	return this.key2;
+    }
 }
 
