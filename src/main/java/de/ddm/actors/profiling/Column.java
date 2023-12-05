@@ -25,4 +25,8 @@ public class Column {
         return columnValues;
     }
 
+    void addColumnValues(String columnValues){
+        this.columnValues.add(columnValues);
+    }
+
 }

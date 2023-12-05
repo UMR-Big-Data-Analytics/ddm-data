@@ -20,6 +20,7 @@ import lombok.NoArgsConstructor;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
@@ -109,16 +110,16 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final boolean discoverNaryDependencies;
     private final File[] inputFiles;
     private final String[][] headerLines;
-
-    private final List<Column> columnOfStrings = new ArrayList<>();
-    private final List<Column> columnOfNumbers = new ArrayList<>();
+    // CompositeKey the first key is the name of the file and the second key is the name of the column
+    private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
+    private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
 
     private final List<DependencyWorker.TaskMessage> taskList = new ArrayList<>();
     private final List<ActorRef<InputReader.Message>> inputReaders;
     private final ActorRef<ResultCollector.Message> resultCollector;
+    private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
-    private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
 
     ////////////////////
     // Actor Behavior //
@@ -151,7 +152,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     }
 
     //TODO : not sure if this is correct
-    private boolean allFilesHaveBeenRead(){
+    private boolean allFilesHaveBeenRead() {
         for (int i = 0; i < this.inputFiles.length; i++) {
             if (this.headerLines[i] == null) {
                 return false;
@@ -166,21 +167,13 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         if (!batch.isEmpty()) {
             int amountOfColumns = batch.get(0).length;
             for (int column = 0; column < amountOfColumns; column++) {
-                if (tables.get(message.getId()).amountOfColumns() == 0) {
-                    this.getContext().getLog().info("Creating new table for file {}!", this.inputFiles[message.getId()].getName());
-                    tables.get(message.getId()).setNameOfDataset(this.inputFiles[message.getId()].getName());
-                    // Here we are adding the Column number
-                    Column newColumn = new Column(column);
-                    newColumn.addValueToColumn(batch.get(0)[column]);
-                    tables.get(message.getId()).addColumn(newColumn);
-                }
-
                 for (String[] row : batch) {
-                    if (tables.get(message.getId()).getColumnsList().get(column).getColumnValues().contains(row[column])) {
-                        continue;
+                    if (row[column].matches("\\d+(-\\d+)*")) {
+                        this.getContext().getLog().info("Adding new value to columnNumbers of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
+                        placingInBucket(message, column, row, columnOfNumbers);
                     } else {
-                        this.getContext().getLog().info("Adding new value to column {} of file {}!", column, this.inputFiles[message.getId()].getName());
-                        tables.get(message.getId()).getColumnsList().get(column).addValueToColumn(row[column]);
+                        this.getContext().getLog().info("Adding new value to columnStrings of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
+                        placingInBucket(message, column, row, columnOfStrings);
                     }
                 }
                 // here we are telling the inputReader to read the next batch
@@ -189,7 +182,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         } else {
             this.getContext().getLog().info("Finished reading file {}!", this.inputFiles[message.getId()].getName());
 
-            if(allFilesHaveBeenRead()) {
+            if (allFilesHaveBeenRead()) {
                 this.getContext().getLog().info("Finished reading all files! Mining will start!");
                 // Here we are telling the inputReader to read the next batch
                 startMining();
@@ -198,13 +191,18 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
-    private void startMining() {
-        this.getContext().getLog().info("Starting mining!");
-        // Starting at table 1 not 0 because we are comparing the first table with the second table
-        for (int i = 1; i < tables.size(); i++) {
-            for(int j = 0; j < tables.get(j).amountOfColumns(); j++)
-            taskDedication(tables.get(j).getColumnsList(), tables.get(i));
+    private void placingInBucket(BatchMessage message, int column, String[] row, HashMap<CompositeKey, Column> columnOf) {
+        if (columnOf.containsKey(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])))
+            columnOf.get((new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))).addValueToColumn(row[column]);
+        else {
+            columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column));
+            columnOf.get(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
         }
+    }
+
+    private void startMining() {
+
+
     }
 
     private void taskDedication(List<de.ddm.actors.profiling.Column> Column, Table Table) {
