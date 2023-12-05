@@ -42,11 +42,13 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
 		int taskId;
 		// for the first column
-		int key1;
-		int key2;
+		String key1;
+		String key2;
 		// for the second column
-		int key3;
-		int key4;
+		String key3;
+		String key4;
+
+		boolean isString;
 	}
 
 	////////////////////////

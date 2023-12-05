@@ -173,10 +173,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 for (String[] row : batch) {
                     if (row[column].matches("\\d+(-\\d+)*")) {
                         this.getContext().getLog().info("Adding new value to columnNumbers of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
-                        placingInBucket(message, column, row, columnOfNumbers);
+                        placingInBucket(message, column, row, columnOfNumbers,"number");
                     } else {
                         this.getContext().getLog().info("Adding new value to columnStrings of {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
-                        placingInBucket(message, column, row, columnOfStrings);
+                        placingInBucket(message, column, row, columnOfStrings,"string");
                     }
                 }
                 // here we are telling the inputReader to read the next batch
@@ -194,31 +194,52 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
-    private void placingInBucket(BatchMessage message, int column, String[] row, HashMap<CompositeKey, Column> columnOf) {
-        if (columnOf.containsKey(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])))
+    private void placingInBucket(BatchMessage message, int column, String[] row, HashMap<CompositeKey, Column> columnOf, String type) {
+        if (columnOf.containsKey(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))){
+            this.getContext().getLog().info("Adding new value to column {} from file {}!", this.headerLines[message.id][column], this.inputFiles[message.getId()].getName());
             columnOf.get((new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))).addValueToColumn(row[column]);
+        }
         else {
             columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column));
+            this.getContext().getLog().info("Adding new column{} to columnOf{} from file {}!", this.headerLines[message.id][column], type, this.inputFiles[message.getId()].getName());
             columnOf.get(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
         }
     }
 
     private void startMining() {
             this.getContext().getLog().info("Starting mining!");
-
+            creatingTaskLists();
     }
 
     private void creatingTaskLists() {
-        for (int i = 0; i < this.headerLines.length; i++) {
-            for (int j = 0; j < this.headerLines[i].length; j++) {
-                listOfTasks.add( new DependencyWorker.TaskMessage(
-                        null,
-                        -1,
-                        i,
-                        j,
-                        i + 1,
-                        j + 1)
-                );
+        //This is for columnOfNumbers
+        for (CompositeKey key1 : columnOfNumbers.keySet()){
+            for (CompositeKey key2 : columnOfNumbers.keySet()){
+                if (!key1.equals(key2))
+                    listOfTasks.add(
+                            new DependencyWorker.TaskMessage(
+                                    null, -1,
+                                    key1.getSubKey1(),
+                                    key1.getSubKey2(),
+                                    key2.getSubKey1(),
+                                    key2.getSubKey2(),
+                                    false));
+
+            }
+        }
+        //This is for columnOfStrings
+        for (CompositeKey key1 : columnOfStrings.keySet()){
+            for (CompositeKey key2 : columnOfStrings.keySet()){
+                if (!key1.equals(key2))
+                    listOfTasks.add(
+                            new DependencyWorker.TaskMessage(
+                                    null, -1,
+                                    key1.getSubKey1(),
+                                    key1.getSubKey2(),
+                                    key2.getSubKey1(),
+                                    key2.getSubKey2(),
+                                    true));
+
             }
         }
     }
