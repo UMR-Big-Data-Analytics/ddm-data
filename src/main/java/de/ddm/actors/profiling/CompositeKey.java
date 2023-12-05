@@ -3,10 +3,10 @@ package de.ddm.actors.profiling;
 import java.util.Objects;
 
 public class CompositeKey {
-    private final Object key1;
-    private final Object key2;
+    private final String key1;
+    private final String key2;
 
-    public CompositeKey(Object key1, Object key2) {
+    public CompositeKey(String key1, String key2) {
         this.key1 = key1;
         this.key2 = key2;
     }
