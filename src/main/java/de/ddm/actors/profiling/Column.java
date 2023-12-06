@@ -9,8 +9,12 @@ public class Column {
     //To make sure that the values are unique
     private HashSet<String> columnValues;
     private String type;
+    @Getter
+    private String columnName;
+    @Getter
+    private String nameOfDataset;
 
-    Column(int id, String type){
+    Column(int id, String type, String columnName, String nameOfDataset){
         this.id = id;
         this.type = type;
     }

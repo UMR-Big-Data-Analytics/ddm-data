@@ -236,7 +236,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             this.getContext().getLog().info("Adding new value to columnOf{} from file{} column {}!", type, this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]);
             columnOf.get((new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]))).addValueToColumn(row[column]);
         } else {
-            columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column, type));
+            columnOf.put(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column, type, this.headerLines[message.id][column], this.inputFiles[message.getId()].getName()));
             this.getContext().getLog().info("Adding new column {} to columnOf{} from file {}!", this.headerLines[message.id][column], type, this.inputFiles[message.getId()].getName());
             columnOf.get(new CompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
         }
@@ -330,7 +330,27 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     }
 
     private Behavior<Message> handle(CompletionMessage message) {
+        this.getContext().getLog().info("Received CompletionMessage from worker {} for task {}!", message.getDependencyWorker(), message.getTaskId());
+        ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
+        if (message.isHasDependency()) {
+            this.getContext().getLog().info("Received IND from worker {} for task {}!", message.getDependencyWorker(), message.getTaskId());
+            this.getContext().getLog().info("IND is {} and {} from {} to {}!",
+                    message.getColumn1().getColumnName(),
+                    message.getColumn2().getNameOfDataset(),
+                    message.getColumn1().getNameOfDataset(),
+                    message.getColumn2().getNameOfDataset());
 
+            File dependentFile = new File(message.getColumn2().getNameOfDataset());
+            File referencedFile = new File(message.getColumn1().getNameOfDataset());
+            String[] dependentColumnName = new String[]{message.getColumn2().getColumnName()};
+            String[] referencedColumnName = new String[]{message.getColumn1().getColumnName()};
+
+
+            InclusionDependency ind = new InclusionDependency(dependentFile, dependentColumnName, referencedFile, referencedColumnName);
+        }
+
+        taskDone.remove(0);
+        giveTasksToWorkers(dependencyWorker, message.getTaskId());
         return this;
     }
 
