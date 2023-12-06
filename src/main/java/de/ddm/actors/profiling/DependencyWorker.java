@@ -91,6 +91,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
     private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
     private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
+    private TaskMessage taskMessage;
     ////////////////////
     // Actor Behavior //
     ////////////////////
@@ -112,6 +113,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     }
 
     private Behavior<Message> handle(TaskMessage message) {
+        this.taskMessage = message;
         this.getContext().getLog().info("New Task {}", message.getTaskId());
         if (message.isStringColumn()) {
             if (!columnOfStrings.containsKey(new CompositeKey(message.getKey3(), message.getKey4()))) {
@@ -157,7 +159,29 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         return this;
     }
 
-    private void findingIND(){
+    private void findingIND() {
+        this.getContext().getLog().info("Working on task!{} ", taskMessage.getTaskId());
+        boolean result;
+        Column column1;
+        Column column2;
+        if (taskMessage.isStringColumn()) {
+            column1 = columnOfStrings.get(new CompositeKey(taskMessage.getKey1(), taskMessage.getKey2()));
+            column2 = columnOfStrings.get(new CompositeKey(taskMessage.getKey3(), taskMessage.getKey4()));
+        } else {
+            column1 = columnOfNumbers.get(new CompositeKey(taskMessage.getKey1(), taskMessage.getKey2()));
+            column2 = columnOfNumbers.get(new CompositeKey(taskMessage.getKey3(), taskMessage.getKey4()));
+        }
+
+        result = column1.getColumnValues().containsAll(column2.getColumnValues());
+
+        LargeMessageProxy.LargeMessage resultMessage = new DependencyMiner.CompletionMessage(
+                this.getContext().getSelf(),
+                taskMessage.getTaskId(),
+                result,
+                column1,
+                column2);
+
+        this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(resultMessage, taskMessage.getDependencyMinerLargeMessageProxy()));
 
     }
 }
