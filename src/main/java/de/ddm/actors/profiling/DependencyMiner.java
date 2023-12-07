@@ -19,9 +19,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.io.File;
+import java.lang.reflect.Array;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.stream.Collectors;
 
 public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
@@ -89,6 +92,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		this.discoverNaryDependencies = SystemConfigurationSingleton.get().isHardMode();
 		this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
 		this.headerLines = new String[this.inputFiles.length][];
+		this.data = new ArrayList<>();
+		for (int i=0; i < this.inputFiles.length; i++) {
+			this.data.add(new ArrayList<>());
+		}
+		this.finishedLoading = new boolean[this.inputFiles.length];
 
 		this.inputReaders = new ArrayList<>(inputFiles.length);
 		for (int id = 0; id < this.inputFiles.length; id++)
@@ -110,6 +118,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private final boolean discoverNaryDependencies;
 	private final File[] inputFiles;
 	private final String[][] headerLines;
+	private List<List<List<String>>> data;
+	private boolean[] finishedLoading;
 
 	private final List<ActorRef<InputReader.Message>> inputReaders;
 	private final ActorRef<ResultCollector.Message> resultCollector;
@@ -147,11 +157,27 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		return this;
 	}
 
+	private static boolean areAllTrue(boolean[] array)
+	{
+		for(boolean b : array) if(!b) return false;
+		return true;
+	}
+
 	private Behavior<Message> handle(BatchMessage message) {
 		// Ignoring batch content for now ... but I could do so much with it.
 
+		List<List<String>> table = this.data.get(message.getId());
+		table.addAll(message.getBatch().stream().map(row-> Arrays.asList(row)).collect(Collectors.toList()));
+
 		if (message.getBatch().size() != 0)
 			this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
+		else {
+			this.finishedLoading[message.getId()] = true;
+			this.getContext().getLog().info("Finished reading table {}", message.getId());
+		}
+		if(areAllTrue(this.finishedLoading))
+			this.getContext().getLog().info("Finished reading all tables!!!");
+
 		return this;
 	}
 
@@ -163,7 +189,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
 			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
 
-			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
+			// dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
 		}
 		return this;
 	}
@@ -189,7 +215,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
 		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
+		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,null, null,42));
 
 		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
 		if (System.currentTimeMillis() - this.startTime > 2000000)
