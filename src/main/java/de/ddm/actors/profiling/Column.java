@@ -5,10 +5,10 @@ import lombok.Getter;
 import java.util.HashSet;
 
 public class Column {
-    private int id;
+    private final int id;
     //To make sure that the values are unique
-    private HashSet<String> columnValues;
-    private String type;
+    private final HashSet<String> columnValues;
+    private final String type;
     @Getter
     private String columnName;
     @Getter
@@ -17,6 +17,9 @@ public class Column {
     Column(int id, String type, String columnName, String nameOfDataset){
         this.id = id;
         this.type = type;
+        this.columnName = columnName;
+        this.nameOfDataset = nameOfDataset;
+        columnValues = new HashSet<>();
     }
     void addValueToColumn(String value){
         columnValues.add(value);
@@ -28,10 +31,6 @@ public class Column {
 
     HashSet<String> getColumnValues(){
         return columnValues;
-    }
-
-    void addColumnValues(String columnValues){
-        this.columnValues.add(columnValues);
     }
 
     public String getType() {
