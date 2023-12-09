@@ -183,14 +183,6 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         return this;
     }
 
-
-    private boolean batchReady(String key1, String key2, String key3, String key4) {
-        this.getContext().getLog().info("I am worker {} and I am checking if the batch is ready, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
-        if (taskMessage.isStringColumn())
-            return columnOfStrings.containsKey(getCompositeKey(key1, key2)) && columnOfStrings.containsKey(getCompositeKey(key3, key4));
-        else
-            return columnOfNumbers.containsKey(getCompositeKey(key1, key2)) && columnOfNumbers.containsKey(getCompositeKey(key3, key4));
-    }
     /*TODO: Here I need to also call the findingIND() method as soon as the data is ready. I need to change the handle(DataMessage message) method to ask for
              all keys and columns as I have to work with them in the ColumnReceiver method!!! TO start FindIND method from here
      */
