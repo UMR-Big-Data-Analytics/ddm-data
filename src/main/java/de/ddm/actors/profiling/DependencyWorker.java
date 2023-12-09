@@ -139,6 +139,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         key2 = message.getKey2();
         key3 = message.getKey3();
         key4 = message.getKey4();
+        this.getContext().getLog().info("The keys are {} : {} and {} : {}", key1, key2, key3, key4);
         this.getContext().getLog().info("New Task {}", message.getTaskId());
         // This is for if the column is a string column
         if (message.isStringColumn()) {
@@ -170,12 +171,12 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
             } else if (!columnOfNumbers.containsKey(getCompositeKey(key1, key2))) {
                 this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, true);
+                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             } else if (!columnOfNumbers.containsKey(getCompositeKey(key3, key4))) {
                 this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key3, key4);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, true);
+                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             } else
                 findingIND();
