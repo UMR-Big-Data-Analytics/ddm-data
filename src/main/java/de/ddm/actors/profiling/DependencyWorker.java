@@ -190,7 +190,14 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     TODO: You also need to make sure that you deal with the situation where you have one pair of keys and not the other
      */
     private Behavior<Message> handle(ColumnReceiver message) {
-    this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+    this.getContext().getLog().info("I am worker {} and I got a columns, the keys I needed", this.getContext().getSelf().path().name());
+    if(message.gotBothColumns) {
+        this.columnOfStrings.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
+        this.columnOfStrings.put(getCompositeKey(message.getKey3(), message.getKey4()), message.column2);
+        this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+        this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
+    }
+    else
         if (message.column.getType().equals("string")) {
             this.columnOfStrings.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
             this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
@@ -198,6 +205,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
             this.columnOfNumbers.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
             this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
         }
+
+        findingIND();
 
         return this;
     }
