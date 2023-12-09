@@ -71,6 +71,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         int taskId;
         String key1;
         String key2;
+        String key3;
+        String key4;
+        boolean getBothColumns;
         boolean isString;
     }
 
@@ -160,18 +163,23 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     // This is for the dependencyWorker to ask for a column
     private Behavior<Message> handle(getNeededColumnMessage getNeededColumnMessage) {
+        if(getNeededColumnMessage.getBothColumns){
+
+        } else
         if (getNeededColumnMessage.isString) {
+            this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
             getNeededColumnMessage.
                     getDependencyWorker().
                     tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), columnOfStrings.get(new CompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()));
+                            ColumnReceiver(getNeededColumnMessage.getTaskId(),false, columnOfStrings.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
+                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(),null,null,null));
 
         } else {
+            this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
             getNeededColumnMessage.getDependencyWorker()
                     .tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), columnOfNumbers.get(new CompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()));
+                            ColumnReceiver(getNeededColumnMessage.getTaskId(),false, columnOfNumbers.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
+                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(),null,null,null));
         }
         return this;
     }

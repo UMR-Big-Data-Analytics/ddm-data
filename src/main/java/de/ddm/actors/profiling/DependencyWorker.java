@@ -50,6 +50,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         String key3;
         String key4;
 
+
         boolean isStringColumn;
 
     }
@@ -60,9 +61,13 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     public static class ColumnReceiver implements Message, LargeMessageProxy.LargeMessage {
         private static final long serialVersionUID = -4667745204456518160L;
         int taskId;
+        boolean gotBothColumns;
         Column column;
         String key1;
         String key2;
+        Column column2;
+        String key3;
+        String key4;
 
     }
 
@@ -126,54 +131,74 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 
     private Behavior<Message> handle(TaskMessage message) {
         this.taskMessage = message;
+        String key1 = message.getKey1();
+        String key2 = message.getKey2();
+        String key3 = message.getKey3();
+        String key4 = message.getKey4();
         this.getContext().getLog().info("New Task {}", message.getTaskId());
+            // This is for if the column is a string column
         if (message.isStringColumn()) {
-            if (!columnOfStrings.containsKey(getCompositeKey(message.getKey3(), message.getKey4()))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
-                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), message.getKey3(), message.getKey4(), true);
-                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            // if I need both columns
+            if (!columnOfStrings.containsKey(getCompositeKey(key1,key2)) && !columnOfStrings.containsKey(getCompositeKey(key3, key4))) {
+                    this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
+                    LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                            this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), message.getKey3(), message.getKey4(), true, true);
+                    this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             }
-            if (!columnOfStrings.containsKey(getCompositeKey(message.getKey1(), message.getKey2()))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+            else if (!columnOfStrings.containsKey(getCompositeKey(key1, key2))) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), true);
+                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, true);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-            }
-
+            } else if (!columnOfStrings.containsKey(getCompositeKey(key3, key4))) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key3, key4);
+                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, true);
+                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            } else
+                findingIND();
+            //This is if the column is a number column
         } else {
-            if (!columnOfNumbers.containsKey(getCompositeKey(message.getKey3(), message.getKey4()))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
+            if (!columnOfNumbers.containsKey(getCompositeKey(key1,key2)) && !columnOfNumbers.containsKey(getCompositeKey(key3, key4))) {
+                this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), message.getKey3(), message.getKey4(), false);
-                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-
-            }
-            if (!columnOfNumbers.containsKey(getCompositeKey(message.getKey1(), message.getKey2()))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
-                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), false);
+                        this.getContext().getSelf(), message.getTaskId(), key1, key2, key3, key4, true, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             }
-
+            else if (!columnOfNumbers.containsKey(getCompositeKey(key1, key2))) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
+                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, true);
+                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            }
+            else if (!columnOfNumbers.containsKey(getCompositeKey(key3, key4))) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key3, key4);
+                LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
+                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, true);
+                this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
+            }
+            else
+                findingIND();
         }
-
-        if(batchReady(message.getKey1(), message.getKey2()))
-            findingIND();
-
         return this;
     }
 
 
-    private boolean batchReady(String key1, String key2) {
-        this.getContext().getLog().info("I am worker {} and I am checking if the batch is ready, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
-        if(taskMessage.isStringColumn())
-            return columnOfStrings.containsKey(getCompositeKey(key1, key2));
+    private boolean batchReady(String key1, String key2, String key3, String key4) {
+        this.getContext().getLog().info("I am worker {} and I am checking if the batch is ready, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
+        if (taskMessage.isStringColumn())
+            return columnOfStrings.containsKey(getCompositeKey(key1, key2)) && columnOfStrings.containsKey(getCompositeKey(key3, key4));
         else
-            return columnOfNumbers.containsKey(getCompositeKey(key1, key2));
+            return columnOfNumbers.containsKey(getCompositeKey(key1, key2)) && columnOfNumbers.containsKey(getCompositeKey(key3, key4));
     }
+    /*TODO: Here I need to also call the findingIND() method as soon as the data is ready. I need to change the handle(DataMessage message) method to ask for
+             all keys and columns as I have to work with them in the ColumnReceiver method!!! TO start FindIND method from here
+     */
+    /*
+    TODO: You also need to make sure that you deal with the situation where you have one pair of keys and not the other
+     */
     private Behavior<Message> handle(ColumnReceiver message) {
-
+    this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
         if (message.column.getType().equals("string")) {
             this.columnOfStrings.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
             this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
