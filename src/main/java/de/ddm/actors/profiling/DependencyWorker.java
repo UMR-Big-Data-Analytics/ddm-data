@@ -233,6 +233,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         }
         this.getContext().getLog().info("Looking for IND between {} and {}", column1, column2);
         result = column1.getColumnValues().containsAll(column2.getColumnValues());
+        this.getContext().getLog().info("{}", result);
 
         LargeMessageProxy.LargeMessage resultMessage = new DependencyMiner.CompletionMessage(
                 this.getContext().getSelf(),

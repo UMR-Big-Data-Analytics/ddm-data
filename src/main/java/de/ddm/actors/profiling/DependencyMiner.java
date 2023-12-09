@@ -381,6 +381,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
 
             InclusionDependency ind = new InclusionDependency(dependentFile, dependentColumnName, referencedFile, referencedColumnName);
+            List<InclusionDependency> inds = new ArrayList<>();
+            inds.add(ind);
+
+            this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
         }
 
         taskDone.remove(0);
