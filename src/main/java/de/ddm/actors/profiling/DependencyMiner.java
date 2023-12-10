@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
 
+import static java.lang.Thread.sleep;
+
 public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
 	////////////////////
@@ -73,6 +75,12 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		private static final long serialVersionUID = -7642425159675583598L;
 		ActorRef<DependencyWorker.Message> dependencyWorker;
 		int result;
+
+		int tableFirstRow;
+		int attributeFirstRow;
+
+		int tableSecondRow;
+		int attributeSecondRow;
 	}
 
 	////////////////////////
@@ -167,9 +175,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		// Ignoring batch content for now ... but I could do so much with it.
 
 		List<List<String>> table = this.data.get(message.getId());
-		table.addAll(message.getBatch().stream().map(row-> Arrays.asList(row)).collect(Collectors.toList()));
+		table.addAll(message.getBatch().stream().map(Arrays::asList).collect(Collectors.toList()));
 
-		if (message.getBatch().size() != 0)
+		if (!message.getBatch().isEmpty())
 			this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
 		else {
 			this.finishedLoading[message.getId()] = true;
@@ -177,6 +185,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		}
 		if(areAllTrue(this.finishedLoading))
 			this.getContext().getLog().info("Finished reading all tables!!!");
+			// fill queue with all possible combinations of tables and attributes
 
 		return this;
 	}
@@ -189,27 +198,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
 			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
 
-			// dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, 42));
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, null,null,42));
 		}
 		return this;
 	}
 
-	private Behavior<Message> handle(CompletionMessage message) {
+	private Behavior<Message> handle(CompletionMessage message) throws InterruptedException {
 		ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
 		// If this was a reasonable result, I would probably do something with it and potentially generate more work ... for now, let's just generate a random, binary IND.
+		if (message.getResult() == -1) {
+			sleep(1000);
+		}
+		else{
 
+		}
 		if (this.headerLines[0] != null) {
-			Random random = new Random();
-			int dependent = random.nextInt(this.inputFiles.length);
-			int referenced = random.nextInt(this.inputFiles.length);
-			File dependentFile = this.inputFiles[dependent];
-			File referencedFile = this.inputFiles[referenced];
-			String[] dependentAttributes = {this.headerLines[dependent][random.nextInt(this.headerLines[dependent].length)], this.headerLines[dependent][random.nextInt(this.headerLines[dependent].length)]};
-			String[] referencedAttributes = {this.headerLines[referenced][random.nextInt(this.headerLines[referenced].length)], this.headerLines[referenced][random.nextInt(this.headerLines[referenced].length)]};
-			InclusionDependency ind = new InclusionDependency(dependentFile, dependentAttributes, referencedFile, referencedAttributes);
-			List<InclusionDependency> inds = new ArrayList<>(1);
-			inds.add(ind);
-
+			List<InclusionDependency> inds = generateDependencies(message);
 			this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
 		}
 		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
@@ -221,6 +225,17 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		if (System.currentTimeMillis() - this.startTime > 2000000)
 			this.end();
 		return this;
+	}
+
+	private List<InclusionDependency> generateDependencies(CompletionMessage message) {
+		File dependentFile = this.inputFiles[message.tableFirstRow];
+		File referencedFile = this.inputFiles[message.tableSecondRow];
+		String dependentAttribute = this.headerLines[message.tableFirstRow][message.attributeFirstRow];
+		String referencedAttribute = this.headerLines[message.tableSecondRow][message.attributeSecondRow];
+		InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute}, referencedFile, new String[]{referencedAttribute});
+		List<InclusionDependency> inds = new ArrayList<>(1);
+		inds.add(ind);
+		return inds;
 	}
 
 	private void end() {
