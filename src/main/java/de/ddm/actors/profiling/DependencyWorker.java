@@ -9,7 +9,6 @@ import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.receptionist.Receptionist;
 import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
-import de.ddm.structures.Column;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -42,12 +41,16 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	public static class TaskMessage implements Message {
 		private static final long serialVersionUID = -4667745204456518160L;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
+
+		int firstTableIndex;
+		int firstTableColumnIndex;
+		List<String> firstColumn;
+
+		int secondTableIndex;
+		int secondTableColumnIndex;
+		List<String> secondColumn;
+
 		int task;
-
-		Column firstColumn;
-		Column secondColumn;
-
-
 	}
 
 	////////////////////////
@@ -98,13 +101,21 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		this.getContext().getLog().info("Working!");
 		int result = -1 ;
 		if (message.firstColumn != null && message.secondColumn != null){
-			boolean dependency = new HashSet<>(message.firstColumn.getValues()).containsAll(message.secondColumn.getValues());
+			boolean dependency = new HashSet<>(message.firstColumn).containsAll(message.secondColumn);
 			result = dependency ? 1 : 0;
+			if (result == 1){
+				this.getContext().getLog().info("found dependency");
+			}
 		}
 
-		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result, message.getFirstColumn().getTableId(), message.getFirstColumn().getName(), message.getSecondColumn().getTableId(), message.getSecondColumn().getName());
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(
+				this.getContext().getSelf(),
+				result,
+				message.firstTableIndex,
+				message.firstTableColumnIndex, message.secondTableIndex, message.secondTableColumnIndex);
 		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 
 		return this;
 	}
+
 }

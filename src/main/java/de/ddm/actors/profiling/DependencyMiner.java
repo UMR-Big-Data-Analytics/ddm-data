@@ -13,17 +13,15 @@ import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
 import de.ddm.singletons.InputConfigurationSingleton;
 import de.ddm.singletons.SystemConfigurationSingleton;
-import de.ddm.structures.Column;
+import de.ddm.structures.CandidatePair;
 import de.ddm.structures.InclusionDependency;
-import de.ddm.structures.Table;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.lang.reflect.Array;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static java.lang.Thread.sleep;
@@ -57,7 +55,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	public static class BatchMessage implements Message {
 		private static final long serialVersionUID = 4591192372652568030L;
 		int id;
-		List<Column> batch;
+		List<String[]> batch;
 	}
 
 	@Getter
@@ -77,10 +75,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		int result;
 
 		int firstTableIndex;
-		String firstColumnName;
+		int firstColumnIndex;
 
 		int secondTableIndex;
-		String secondColumnName;
+		int secondColumnIndex;
 	}
 
 	////////////////////////
@@ -100,7 +98,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		this.discoverNaryDependencies = SystemConfigurationSingleton.get().isHardMode();
 		this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
 		this.headerLines = new String[this.inputFiles.length][];
-		this.tables = new ArrayList<Table>();
+		this.data = new ArrayList<>();
+		for (int i=0; i < this.inputFiles.length; i++) {
+			this.data.add(new ArrayList<>());
+		}
+		this.taskQueue = new LinkedList<>();
 
 		this.inputReaders = new ArrayList<>(inputFiles.length);
 		for (int id = 0; id < this.inputFiles.length; id++)
@@ -109,6 +111,12 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		this.largeMessageProxy = this.getContext().spawn(LargeMessageProxy.create(this.getContext().getSelf().unsafeUpcast()), LargeMessageProxy.DEFAULT_NAME);
 
 		this.dependencyWorkers = new ArrayList<>();
+
+		// In the constructor
+		this.finishedHeaders = new boolean[this.inputFiles.length];
+		this.finishedLoading = new boolean[this.inputFiles.length];
+		Arrays.fill(this.finishedHeaders, false);
+		Arrays.fill(this.finishedLoading, false);
 
 		context.getSystem().receptionist().tell(Receptionist.register(dependencyMinerService, context.getSelf()));
 	}
@@ -122,13 +130,19 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private final boolean discoverNaryDependencies;
 	private final File[] inputFiles;
 	private final String[][] headerLines;
-	private List<Table> tables;
+	private List<List<List<String>>> data;
+
+	private Queue<CandidatePair> taskQueue;
+	private boolean[] finishedHeaders;
+	private boolean[] finishedLoading;
 
 	private final List<ActorRef<InputReader.Message>> inputReaders;
 	private final ActorRef<ResultCollector.Message> resultCollector;
 	private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
 
 	private final List<ActorRef<DependencyWorker.Message>> dependencyWorkers;
+
+	private int currentWorkerIndex = 0;
 
 	////////////////////
 	// Actor Behavior //
@@ -157,31 +171,36 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
 	private Behavior<Message> handle(HeaderMessage message) {
 		this.headerLines[message.getId()] = message.getHeader();
+
+		this.finishedHeaders[message.getId()] = true;
+		checkAndStartTaskDistribution();
 		return this;
 	}
 
-	private static boolean areAllTrue(List<Boolean> array)
+	private static boolean areAllTrue(boolean[] array)
 	{
 		for(boolean b : array) if(!b) return false;
 		return true;
 	}
 
+	private boolean allHeadersReceived() {
+		return Arrays.stream(this.headerLines).noneMatch(Objects::isNull);
+	}
+
 	private Behavior<Message> handle(BatchMessage message) {
-		Table table = this.tables.stream().filter(t -> t.getId() == message.getId()).findFirst().orElse(null);
-        assert table != null;
-        table.getColumns().addAll(message.getBatch());
+		// Ignoring batch content for now ... but I could do so much with it.
+
+		List<List<String>> table = this.data.get(message.getId());
+		table.addAll(message.getBatch().stream().map(Arrays::asList).collect(Collectors.toList()));
 
 		if (!message.getBatch().isEmpty())
 			this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
 		else {
-			table.setFullyLoaded(true);
+			this.finishedLoading[message.getId()] = true;
 			this.getContext().getLog().info("Finished reading table {}", message.getId());
 		}
 
-		if(areAllTrue(tables.stream().map(Table::isFullyLoaded).collect(Collectors.toList())))
-			this.getContext().getLog().info("Finished reading all tables!!!");
-			// fill queue with all possible combinations of tables and attributes
-
+		checkAndStartTaskDistribution();
 		return this;
 	}
 
@@ -193,7 +212,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
 			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
 
-			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,42,new Column(0,"",new ArrayList<>()),new Column(0,"",new ArrayList<>())));
+			//dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
 		}
 		return this;
 	}
@@ -204,14 +223,17 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		if (message.getResult() == -1) {
 			sleep(1000);
 		}
-		else if (message.getResult() == 1){
-			Table table = this.tables.stream().filter(t -> t.getId() == message.getFirstTableIndex()).findFirst().orElse(null);
-            assert table != null;
-            table.getDependencies().add(generateDependency(message));
-		}
+		else{
 
-		//new work... from queue maybe?
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,42,new Column(0,"",new ArrayList<>()),new Column(0,"",new ArrayList<>())));
+		}
+		if (this.headerLines[0] != null) {
+			List<InclusionDependency> inds = generateDependencies(message);
+			this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
+		}
+		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
+		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
+
+		//dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
 
 		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
 		if (System.currentTimeMillis() - this.startTime > 2000000)
@@ -219,10 +241,22 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		return this;
 	}
 
-	private InclusionDependency generateDependency(CompletionMessage message) {
-		File dependentFile = this.inputFiles[message.getFirstTableIndex()];
-		File referencedFile = this.inputFiles[message.getSecondTableIndex()];
-		return new InclusionDependency(dependentFile, new String[]{message.getFirstColumnName()}, referencedFile, new String[]{message.getSecondColumnName()});
+	private void checkAndStartTaskDistribution() {
+		if (areAllTrue(this.finishedHeaders) && areAllTrue(this.finishedLoading)) {
+			getContext().getLog().info("All headers and batches loaded, starting task distribution.");
+			generateAndDistributeUnaryTasks();
+		}
+	}
+
+	private List<InclusionDependency> generateDependencies(CompletionMessage message) {
+		File dependentFile = this.inputFiles[message.firstTableIndex];
+		File referencedFile = this.inputFiles[message.secondTableIndex];
+		String dependentAttribute = this.headerLines[message.firstTableIndex][message.firstColumnIndex];
+		String referencedAttribute = this.headerLines[message.secondTableIndex][message.secondColumnIndex];
+		InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute}, referencedFile, new String[]{referencedAttribute});
+		List<InclusionDependency> inds = new ArrayList<>(1);
+		inds.add(ind);
+		return inds;
 	}
 
 	private void end() {
@@ -235,5 +269,60 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		ActorRef<DependencyWorker.Message> dependencyWorker = signal.getRef().unsafeUpcast();
 		this.dependencyWorkers.remove(dependencyWorker);
 		return this;
+	}
+
+	private ActorRef<DependencyWorker.Message> selectWorker() {
+		if (dependencyWorkers.isEmpty()) {
+			return null; // No workers available
+		}
+		ActorRef<DependencyWorker.Message> selectedWorker = dependencyWorkers.get(currentWorkerIndex);
+
+		// Update the index for the next selection
+		currentWorkerIndex = (currentWorkerIndex + 1) % dependencyWorkers.size();
+		this.getContext().getLog().info("Sent work to worker:", currentWorkerIndex);
+		return selectedWorker;
+	}
+
+	private void generateAndDistributeUnaryTasks() {
+		for (int i = 0; i < headerLines.length; i++) {
+			for (int j = 0; j < headerLines[i].length; j++) {
+				for (int k = 0; k < headerLines.length; k++) {
+					for (int l = 0; l < headerLines[k].length; l++) {
+						if (!(i == k && j == l)) {
+							taskQueue.add(new CandidatePair(i, j, k, l));
+						}
+					}
+				}
+			}
+		}
+		distributeNextTask();
+	}
+
+	private List<String> getColumnData(List<List<String>> tableData, int columnIndex) {
+		return tableData.stream().map(row -> row.get(columnIndex)).collect(Collectors.toList());
+	}
+	private void distributeNextTask() {
+		int counter = 0;
+		while (!taskQueue.isEmpty() && !dependencyWorkers.isEmpty()) {
+			CandidatePair pair = taskQueue.poll();
+			if (pair != null) {
+				ActorRef<DependencyWorker.Message> worker = selectWorker();
+				if (worker != null) {
+					DependencyWorker.TaskMessage task = new DependencyWorker.TaskMessage(
+							largeMessageProxy,
+							pair.getFirstTableIndex(),
+							pair.getFirstColumnIndex(),
+							getColumnData(data.get(pair.getFirstTableIndex()), pair.getFirstColumnIndex()),
+							pair.getSecondTableIndex(),
+							pair.getSecondColumnIndex(),
+							getColumnData(data.get(pair.getSecondTableIndex()), pair.getSecondColumnIndex()),
+							counter
+							// Task-specific information
+					);
+					worker.tell(task);
+					counter++;
+				}
+			}
+		}
 	}
 }

@@ -12,7 +12,6 @@ import com.opencsv.exceptions.CsvValidationException;
 import de.ddm.serialization.AkkaSerializable;
 import de.ddm.singletons.DomainConfigurationSingleton;
 import de.ddm.singletons.InputConfigurationSingleton;
-import de.ddm.structures.Column;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -20,9 +19,7 @@ import lombok.NoArgsConstructor;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class InputReader extends AbstractBehavior<InputReader.Message> {
 
@@ -104,9 +101,8 @@ public class InputReader extends AbstractBehavior<InputReader.Message> {
 				break;
 			batch.add(line);
 		}
-		// map to columns
-		List<Column> columns = batch.stream().map(x-> new Column(0,"", Arrays.asList(x))).collect(Collectors.toList());
-		message.getReplyTo().tell(new DependencyMiner.BatchMessage(this.id, columns));
+
+		message.getReplyTo().tell(new DependencyMiner.BatchMessage(this.id, batch));
 		return this;
 	}
 
