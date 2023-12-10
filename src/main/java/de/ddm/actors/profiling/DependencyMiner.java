@@ -13,17 +13,17 @@ import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
 import de.ddm.singletons.InputConfigurationSingleton;
 import de.ddm.singletons.SystemConfigurationSingleton;
+import de.ddm.structures.Column;
 import de.ddm.structures.InclusionDependency;
+import de.ddm.structures.Table;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.io.File;
-import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 import java.util.stream.Collectors;
 
 import static java.lang.Thread.sleep;
@@ -57,7 +57,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	public static class BatchMessage implements Message {
 		private static final long serialVersionUID = 4591192372652568030L;
 		int id;
-		List<String[]> batch;
+		List<Column> batch;
 	}
 
 	@Getter
@@ -77,10 +77,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		int result;
 
 		int firstTableIndex;
-		int firstColumnIndex;
+		String firstColumnName;
 
 		int secondTableIndex;
-		int secondColumnIndex;
+		String secondColumnName;
 	}
 
 	////////////////////////
@@ -100,11 +100,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		this.discoverNaryDependencies = SystemConfigurationSingleton.get().isHardMode();
 		this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
 		this.headerLines = new String[this.inputFiles.length][];
-		this.data = new ArrayList<>();
-		for (int i=0; i < this.inputFiles.length; i++) {
-			this.data.add(new ArrayList<>());
-		}
-		this.finishedLoading = new boolean[this.inputFiles.length];
+		this.tables = new ArrayList<Table>();
 
 		this.inputReaders = new ArrayList<>(inputFiles.length);
 		for (int id = 0; id < this.inputFiles.length; id++)
@@ -126,8 +122,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	private final boolean discoverNaryDependencies;
 	private final File[] inputFiles;
 	private final String[][] headerLines;
-	private List<List<List<String>>> data;
-	private boolean[] finishedLoading;
+	private List<Table> tables;
 
 	private final List<ActorRef<InputReader.Message>> inputReaders;
 	private final ActorRef<ResultCollector.Message> resultCollector;
@@ -165,25 +160,25 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		return this;
 	}
 
-	private static boolean areAllTrue(boolean[] array)
+	private static boolean areAllTrue(List<Boolean> array)
 	{
 		for(boolean b : array) if(!b) return false;
 		return true;
 	}
 
 	private Behavior<Message> handle(BatchMessage message) {
-		// Ignoring batch content for now ... but I could do so much with it.
-
-		List<List<String>> table = this.data.get(message.getId());
-		table.addAll(message.getBatch().stream().map(Arrays::asList).collect(Collectors.toList()));
+		Table table = this.tables.stream().filter(t -> t.getId() == message.getId()).findFirst().orElse(null);
+        assert table != null;
+        table.getColumns().addAll(message.getBatch());
 
 		if (!message.getBatch().isEmpty())
 			this.inputReaders.get(message.getId()).tell(new InputReader.ReadBatchMessage(this.getContext().getSelf()));
 		else {
-			this.finishedLoading[message.getId()] = true;
+			table.setFullyLoaded(true);
 			this.getContext().getLog().info("Finished reading table {}", message.getId());
 		}
-		if(areAllTrue(this.finishedLoading))
+
+		if(areAllTrue(tables.stream().map(Table::isFullyLoaded).collect(Collectors.toList())))
 			this.getContext().getLog().info("Finished reading all tables!!!");
 			// fill queue with all possible combinations of tables and attributes
 
@@ -198,7 +193,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
 			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
 
-			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,42,new Column(0,"",new ArrayList<>()),new Column(0,"",new ArrayList<>())));
 		}
 		return this;
 	}
@@ -209,17 +204,14 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		if (message.getResult() == -1) {
 			sleep(1000);
 		}
-		else{
-
+		else if (message.getResult() == 1){
+			Table table = this.tables.stream().filter(t -> t.getId() == message.getFirstTableIndex()).findFirst().orElse(null);
+            assert table != null;
+            table.getDependencies().add(generateDependency(message));
 		}
-		if (this.headerLines[0] != null) {
-			List<InclusionDependency> inds = generateDependencies(message);
-			this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
-		}
-		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
-		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
+		//new work... from queue maybe?
+		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,42,new Column(0,"",new ArrayList<>()),new Column(0,"",new ArrayList<>())));
 
 		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
 		if (System.currentTimeMillis() - this.startTime > 2000000)
@@ -227,15 +219,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		return this;
 	}
 
-	private List<InclusionDependency> generateDependencies(CompletionMessage message) {
-		File dependentFile = this.inputFiles[message.firstTableIndex];
-		File referencedFile = this.inputFiles[message.secondTableIndex];
-		String dependentAttribute = this.headerLines[message.firstTableIndex][message.firstColumnIndex];
-		String referencedAttribute = this.headerLines[message.secondTableIndex][message.secondColumnIndex];
-		InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute}, referencedFile, new String[]{referencedAttribute});
-		List<InclusionDependency> inds = new ArrayList<>(1);
-		inds.add(ind);
-		return inds;
+	private InclusionDependency generateDependency(CompletionMessage message) {
+		File dependentFile = this.inputFiles[message.getFirstTableIndex()];
+		File referencedFile = this.inputFiles[message.getSecondTableIndex()];
+		return new InclusionDependency(dependentFile, new String[]{message.getFirstColumnName()}, referencedFile, new String[]{message.getSecondColumnName()});
 	}
 
 	private void end() {
