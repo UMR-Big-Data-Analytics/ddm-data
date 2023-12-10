@@ -41,12 +41,15 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	public static class TaskMessage implements Message {
 		private static final long serialVersionUID = -4667745204456518160L;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
-		int tableFirstColumn;
-		int attributeFirstColumn;
+
+		int firstTableIndex;
+		int firstTableColumnIndex;
 		List<String> firstColumn;
-		int tableSecondColumn;
-		int attributeSecondColumn;
+
+		int secondTableIndex;
+		int secondTableColumnIndex;
 		List<String> secondColumn;
+
 		int task;
 	}
 
@@ -102,7 +105,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 			result = dependency ? 1 : 0;
 		}
 
-		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result);
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result,0,0,0,0);
 		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 
 		return this;

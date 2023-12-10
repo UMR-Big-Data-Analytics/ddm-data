@@ -76,11 +76,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		ActorRef<DependencyWorker.Message> dependencyWorker;
 		int result;
 
-		int tableFirstRow;
-		int attributeFirstRow;
+		int firstTableIndex;
+		int firstColumnIndex;
 
-		int tableSecondRow;
-		int attributeSecondRow;
+		int secondTableIndex;
+		int secondColumnIndex;
 	}
 
 	////////////////////////
@@ -198,7 +198,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 			// The worker should get some work ... let me send her something before I figure out what I actually want from her.
 			// I probably need to idle the worker for a while, if I do not have work for it right now ... (see master/worker pattern)
 
-			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy, null,null,42));
+			dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
 		}
 		return this;
 	}
@@ -219,7 +219,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
 		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 
-		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,null, null,42));
+		dependencyWorker.tell(new DependencyWorker.TaskMessage(this.largeMessageProxy,0,0,null,0,0, null,42));
 
 		// At some point, I am done with the discovery. That is when I should call my end method. Because I do not work on a completable task yet, I simply call it after some time.
 		if (System.currentTimeMillis() - this.startTime > 2000000)
@@ -228,10 +228,10 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 	}
 
 	private List<InclusionDependency> generateDependencies(CompletionMessage message) {
-		File dependentFile = this.inputFiles[message.tableFirstRow];
-		File referencedFile = this.inputFiles[message.tableSecondRow];
-		String dependentAttribute = this.headerLines[message.tableFirstRow][message.attributeFirstRow];
-		String referencedAttribute = this.headerLines[message.tableSecondRow][message.attributeSecondRow];
+		File dependentFile = this.inputFiles[message.firstTableIndex];
+		File referencedFile = this.inputFiles[message.secondTableIndex];
+		String dependentAttribute = this.headerLines[message.firstTableIndex][message.firstColumnIndex];
+		String referencedAttribute = this.headerLines[message.secondTableIndex][message.secondColumnIndex];
 		InclusionDependency ind = new InclusionDependency(dependentFile, new String[]{dependentAttribute}, referencedFile, new String[]{referencedAttribute});
 		List<InclusionDependency> inds = new ArrayList<>(1);
 		inds.add(ind);
