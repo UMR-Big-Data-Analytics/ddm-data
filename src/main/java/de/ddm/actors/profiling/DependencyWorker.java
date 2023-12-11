@@ -9,10 +9,13 @@ import akka.actor.typed.javadsl.Receive;
 import akka.actor.typed.receptionist.Receptionist;
 import de.ddm.actors.patterns.LargeMessageProxy;
 import de.ddm.serialization.AkkaSerializable;
+import de.ddm.structures.Column;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.util.HashSet;
+import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
@@ -39,6 +42,10 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	public static class TaskMessage implements Message {
 		private static final long serialVersionUID = -4667745204456518160L;
 		ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
+
+		Column firstColumn;
+		Column secondColumn;
+
 		int task;
 	}
 
@@ -87,19 +94,21 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 	}
 
 	private Behavior<Message> handle(TaskMessage message) {
-		this.getContext().getLog().info("Working!");
-		// I should probably know how to solve this task, but for now I just pretend some work...
+		int result = -1 ;
+		if (message.firstColumn != null && message.secondColumn != null){
+			long start = System.nanoTime();
+			boolean dependency = message.secondColumn.getValues().containsAll(message.firstColumn.getValues());
+			long end = System.nanoTime();
+			this.getContext().getLog().info("Working time: {}ms", (end - start));
+			result = dependency ? 1 : 0;
+			if (result == 1){
+				this.getContext().getLog().info("Found dependency!");
+			}
+		}
 
-		int result = message.getTask();
-		long time = System.currentTimeMillis();
-		Random rand = new Random();
-		int runtime = (rand.nextInt(2) + 2) * 1000;
-		while (System.currentTimeMillis() - time < runtime)
-			result = ((int) Math.abs(Math.sqrt(result)) * result) % 1334525;
-
-		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result);
-		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result, message.getFirstColumn().getTableId(), message.getFirstColumn().getName(), message.getSecondColumn().getTableId(), message.getSecondColumn().getName());		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 
 		return this;
 	}
+
 }
