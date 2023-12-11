@@ -223,13 +223,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 		if (message.getResult() == -1) {
 			sleep(1000);
 		}
-		else{
-
-		}
-		if (this.headerLines[0] != null) {
+		else if (message.getResult() == 1) {
 			List<InclusionDependency> inds = generateDependencies(message);
 			this.resultCollector.tell(new ResultCollector.ResultMessage(inds));
 		}
+
 		// I still don't know what task the worker could help me to solve ... but let me keep her busy.
 		// Once I found all unary INDs, I could check if this.discoverNaryDependencies is set to true and try to detect n-ary INDs as well!
 

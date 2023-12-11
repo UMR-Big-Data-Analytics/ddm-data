@@ -104,7 +104,7 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 			boolean dependency = new HashSet<>(message.firstColumn).containsAll(message.secondColumn);
 			result = dependency ? 1 : 0;
 			if (result == 1){
-				this.getContext().getLog().info("found dependency");
+				this.getContext().getLog().info("Found dependency!!!");
 			}
 		}
 
