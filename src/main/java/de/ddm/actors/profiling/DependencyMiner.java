@@ -206,6 +206,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private Behavior<Message> handle(CompletionMessage message) {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
+
         if (message.getResult() == -1) {
             this.taskQueue.add(new CandidatePair(message.getFirstTableIndex(), message.getFirstColumnName(), message.getSecondTableIndex(), message.getSecondColumnName()));
             getContext().getLog().warn("Result of the worker was -1");

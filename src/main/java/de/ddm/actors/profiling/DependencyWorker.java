@@ -97,9 +97,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 		int result = -1 ;
 		if (message.firstColumn != null && message.secondColumn != null){
 			long start = System.nanoTime();
-			boolean dependency = message.firstColumn.getValues().containsAll(message.secondColumn.getValues());
+			boolean dependency = message.secondColumn.getValues().containsAll(message.firstColumn.getValues());
 			long end = System.nanoTime();
-			this.getContext().getLog().info("Working time: " + (end - start));
+			this.getContext().getLog().info("Working time: {}ms", (end - start));
 			result = dependency ? 1 : 0;
 			if (result == 1){
 				this.getContext().getLog().info("Found dependency!");
