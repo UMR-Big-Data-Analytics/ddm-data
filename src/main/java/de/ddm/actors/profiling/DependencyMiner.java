@@ -100,6 +100,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         this.inputFiles = InputConfigurationSingleton.get().getInputFiles();
         this.tables = new ArrayList<Table>();
         this.taskQueue = new LinkedList<>();
+        this.taskTracking = new HashMap<>();
         this.inputReaders = new ArrayList<>(inputFiles.length);
         for (int id = 0; id < this.inputFiles.length; id++)
             this.inputReaders.add(context.spawn(InputReader.create(id, this.inputFiles[id]), InputReader.DEFAULT_NAME + "_" + id));
@@ -121,6 +122,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final File[] inputFiles;
     private List<Table> tables;
     private Queue<CandidatePair> taskQueue;
+    private HashMap<ActorRef<DependencyWorker.Message>, CandidatePair> taskTracking;
     private int taskCounter = 0;
     private boolean finishedFillingQueue = false;
     private final List<ActorRef<InputReader.Message>> inputReaders;
@@ -206,6 +208,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private Behavior<Message> handle(CompletionMessage message) {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
+        taskTracking.remove(dependencyWorker);
 
         if (message.getResult() == -1) {
             this.taskQueue.add(new CandidatePair(message.getFirstTableIndex(), message.getFirstColumnName(), message.getSecondTableIndex(), message.getSecondColumnName()));
@@ -251,6 +254,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private Behavior<Message> handle(Terminated signal) {
         ActorRef<DependencyWorker.Message> dependencyWorker = signal.getRef().unsafeUpcast();
         this.dependencyWorkers.remove(dependencyWorker);
+        if (taskTracking.containsKey(dependencyWorker)){
+            taskQueue.add(taskTracking.get(dependencyWorker));
+        }
         return this;
     }
 
@@ -295,11 +301,11 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                     firstColumn,
                     secondColumn,
                     taskCounter++);
-
+            this.taskTracking.put(worker, pair);
             worker.tell(task);
             this.getContext().getLog().info(" task {} sent to worker", taskCounter);
 
-
         }
+
     }
 }

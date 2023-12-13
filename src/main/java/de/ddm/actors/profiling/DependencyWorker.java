@@ -106,7 +106,11 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
 			}
 		}
 
-		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(this.getContext().getSelf(), result, message.getFirstColumn().getTableId(), message.getFirstColumn().getName(), message.getSecondColumn().getTableId(), message.getSecondColumn().getName());		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
+		LargeMessageProxy.LargeMessage completionMessage = new DependencyMiner.CompletionMessage(
+				this.getContext().getSelf(), result, message.getFirstColumn().getTableId(),
+				message.getFirstColumn().getName(), message.getSecondColumn().getTableId(),
+				message.getSecondColumn().getName());
+		this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(completionMessage, message.getDependencyMinerLargeMessageProxy()));
 
 		return this;
 	}
