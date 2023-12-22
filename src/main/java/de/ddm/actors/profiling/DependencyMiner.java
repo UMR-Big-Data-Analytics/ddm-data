@@ -69,10 +69,8 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         private static final long serialVersionUID = -4025238529984914107L;
         ActorRef<DependencyWorker.Message> dependencyWorker;
         int taskId;
-        String key1;
-        String key2;
-        String key3;
-        String key4;
+        int key1;
+        int key2;
         boolean getBothColumns;
         boolean isString;
     }
@@ -85,8 +83,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ActorRef<DependencyWorker.Message> dependencyWorker;
         int taskId;
         boolean hasDependency;
-        Column column1;
-        Column column2;
+        int key1;
+        int key2;
+        boolean isString;
     }
 
     ////////////////////////
@@ -131,8 +130,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final boolean[] allFilesHaveBeenRead;
     private final List<ActorRef<LargeMessageProxy.Message>> dependencyWorkersLargeMessageProxy;
     // CompositeKey the first key is the name of the file and the second key is the name of the column
-    private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
-    private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
+    private final HashMap<Integer, Column> columnOfStrings = new HashMap<>();
+    private final HashMap<Integer, Column> columnOfNumbers = new HashMap<>();
+    private final HashMap<String, Integer> keyDictionary = new HashMap<>();
     HashMap<AbstractMap.SimpleEntry<String, String>, CompositeKey> compositeKeyPool = new HashMap<>();
     private final List<DependencyWorker.TaskMessage> listOfTasks = new ArrayList<>();
     private boolean allTasksHavebeenCreated = false;
@@ -169,32 +169,30 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 getNeededColumnMessage.
                         getDependencyWorker().
                         tell(new DependencyWorker.
-                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfStrings.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfStrings.get(getCompositeKey(getNeededColumnMessage.getKey3(), getNeededColumnMessage.getKey4()))
-                                , getNeededColumnMessage.getKey3(), getNeededColumnMessage.getKey4()));
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfStrings.get(getNeededColumnMessage.getKey1())
+                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfStrings.get(getNeededColumnMessage.getKey2())));
             } else {
                 this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
                 getNeededColumnMessage.
                         getDependencyWorker().
                         tell(new DependencyWorker.
-                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfNumbers.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfNumbers.get(getCompositeKey(getNeededColumnMessage.getKey3(), getNeededColumnMessage.getKey4()))
-                                , getNeededColumnMessage.getKey3(), getNeededColumnMessage.getKey4()));
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfNumbers.get(getNeededColumnMessage.getKey1())
+                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfNumbers.get(getNeededColumnMessage.getKey2())));
             }
         } else if (getNeededColumnMessage.isString) {
             this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
             getNeededColumnMessage.
                     getDependencyWorker().
                     tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfStrings.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), null, null, null));
+                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfStrings.get(getNeededColumnMessage.getKey1())
+                            , getNeededColumnMessage.getKey1(), -1, null));
 
         } else {
             this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
             getNeededColumnMessage.getDependencyWorker()
                     .tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfNumbers.get(getCompositeKey(getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2()))
-                            , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), null, null, null));
+                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfNumbers.get(getNeededColumnMessage.getKey1())
+                            , getNeededColumnMessage.getKey1(), -1, null));
         }
         return this;
     }
@@ -240,9 +238,9 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
             for (int column = 0; column < amountOfColumns; column++) {
                 for (String[] row : batch) {
                     if (row[column].matches("\\d+(-\\d+)*")) {
-                        placingInBucket(message, column, row, columnOfNumbers, "number");
+                        placingInBucket(message, column, row, keyMaker(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), false);
                     } else {
-                        placingInBucket(message, column, row, columnOfStrings, "string");
+                        placingInBucket(message, column, row, keyMaker(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), true);
                     }
                 }
             }
@@ -262,13 +260,28 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return this;
     }
 
-    private void placingInBucket(BatchMessage message, int column, String[] row, HashMap<CompositeKey, Column> columnOf, String type) {
-
-        if (columnOf.containsKey(getCompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])))
-            columnOf.get(getCompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
+    private int keyMaker(String tableName, String columnName) {
+        String key = tableName + columnName;
+        if (keyDictionary.containsKey(key))
+            return keyDictionary.get(key);
         else {
-            columnOf.put(getCompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column]), new Column(column, type, this.headerLines[message.id][column], this.inputFiles[message.getId()].getName()));
-            columnOf.get(getCompositeKey(this.inputFiles[message.getId()].getName(), this.headerLines[message.id][column])).addValueToColumn(row[column]);
+            keyDictionary.put(key, key.hashCode());
+            return key.hashCode();
+        }
+    }
+
+    private void placingInBucket(BatchMessage message, int column, String[] row, int key, boolean isString) {
+        if (isString) {
+            if (columnOfStrings.containsKey(key))
+                columnOfStrings.get(key).addValueToColumn(row[column]);
+            else
+                columnOfStrings.put(key, new Column(column, isString, this.headerLines[message.id][column], this.inputFiles[message.getId()].getName()));
+
+        } else {
+            if (columnOfNumbers.containsKey(key))
+                columnOfNumbers.get(key).addValueToColumn(row[column]);
+            else
+                columnOfNumbers.put(key, new Column(column, isString, this.headerLines[message.id][column], this.inputFiles[message.getId()].getName()));
         }
     }
 
@@ -285,34 +298,27 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
 
     private void creatingTaskLists() {
         //This is for columnOfNumbers
-        for (CompositeKey key1 : columnOfNumbers.keySet()) {
-            for (CompositeKey key2 : columnOfNumbers.keySet()) {
-                if (!key1.equals(key2)) {
+        for (int key1 : columnOfNumbers.keySet()) {
+            for (int key2 : columnOfNumbers.keySet()) {
+                if (key1 != key2) {
                     taskDone.add(false);
                     listOfTasks.add(
                             new DependencyWorker.TaskMessage(
                                     null, -1,
-                                    key1.getSubKey1(),
-                                    key1.getSubKey2(),
-                                    key2.getSubKey1(),
-                                    key2.getSubKey2(),
+                                    key1, key2,
                                     false));
                 }
-
             }
         }
         //This is for columnOfStrings
-        for (CompositeKey key1 : columnOfStrings.keySet()) {
-            for (CompositeKey key2 : columnOfStrings.keySet()) {
-                if (!key1.equals(key2)) {
+        for (int key1 : columnOfStrings.keySet()) {
+            for (int key2 : columnOfStrings.keySet()) {
+                if (key1 != key2) {
                     taskDone.add(false);
                     listOfTasks.add(
                             new DependencyWorker.TaskMessage(
                                     null, -1,
-                                    key1.getSubKey1(),
-                                    key1.getSubKey2(),
-                                    key2.getSubKey1(),
-                                    key2.getSubKey2(),
+                                    key1, key2,
                                     true));
                 }
 
@@ -368,16 +374,32 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         ActorRef<DependencyWorker.Message> dependencyWorker = message.getDependencyWorker();
         if (message.isHasDependency()) {
             this.getContext().getLog().info("Received IND from worker {} for task {}!", message.getDependencyWorker(), message.getTaskId());
-            this.getContext().getLog().info("IND is {} and {} from {} to {}!",
-                    message.getColumn1().getColumnName(),
-                    message.getColumn2().getNameOfDataset(),
-                    message.getColumn1().getNameOfDataset(),
-                    message.getColumn2().getNameOfDataset());
+            File dependentFile;
+            File referencedFile;
+            String[] dependentColumnName;
+            String[] referencedColumnName;
+            if (message.isString()) {
+                dependentFile = new File(columnOfStrings.get(message.getKey1()).getNameOfDataset());
+                referencedFile = new File(columnOfStrings.get(message.getKey2()).getNameOfDataset());
+                dependentColumnName = new String[]{columnOfStrings.get(message.getKey1()).getColumnName()};
+                referencedColumnName = new String[]{columnOfStrings.get(message.getKey1()).getColumnName()};
+                this.getContext().getLog().info("IND is {} and {} from {} to {}!",
+                        columnOfStrings.get(message.getKey1()).getColumnName(),
+                        columnOfStrings.get(message.getKey2()).getNameOfDataset(),
+                        columnOfStrings.get(message.getKey1()).getNameOfDataset(),
+                        columnOfStrings.get(message.getKey2()).getNameOfDataset());
 
-            File dependentFile = new File(message.getColumn2().getNameOfDataset());
-            File referencedFile = new File(message.getColumn1().getNameOfDataset());
-            String[] dependentColumnName = new String[]{message.getColumn2().getColumnName()};
-            String[] referencedColumnName = new String[]{message.getColumn1().getColumnName()};
+            } else {
+                dependentFile = new File(columnOfNumbers.get(message.getKey1()).getNameOfDataset());
+                referencedFile = new File(columnOfNumbers.get(message.getKey2()).getNameOfDataset());
+                dependentColumnName = new String[]{columnOfNumbers.get(message.getKey1()).getColumnName()};
+                referencedColumnName = new String[]{columnOfNumbers.get(message.getKey1()).getColumnName()};
+                this.getContext().getLog().info("IND is {} and {} from {} to {}!",
+                        columnOfNumbers.get(message.getKey1()).getColumnName(),
+                        columnOfNumbers.get(message.getKey2()).getNameOfDataset(),
+                        columnOfNumbers.get(message.getKey1()).getNameOfDataset(),
+                        columnOfNumbers.get(message.getKey2()).getNameOfDataset());
+            }
 
 
             InclusionDependency ind = new InclusionDependency(dependentFile, dependentColumnName, referencedFile, referencedColumnName);

@@ -44,12 +44,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         ActorRef<LargeMessageProxy.Message> dependencyMinerLargeMessageProxy;
         int taskId;
         // for the first column
-        String key1;
-        String key2;
+        int key1;
+        int key2;
         // for the second column
-        String key3;
-        String key4;
-
 
         boolean isStringColumn;
 
@@ -63,11 +60,9 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         int taskId;
         boolean gotBothColumns;
         Column column;
-        String key1;
-        String key2;
+        int key1;
+        int key2;
         Column column2;
-        String key3;
-        String key4;
 
     }
 
@@ -95,14 +90,11 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     /////////////////
 
     private final ActorRef<LargeMessageProxy.Message> largeMessageProxy;
-    private final HashMap<CompositeKey, Column> columnOfStrings = new HashMap<>();
-    private final HashMap<CompositeKey, Column> columnOfNumbers = new HashMap<>();
+    private final HashMap<Integer, Column> columnOfStrings = new HashMap<>();
+    private final HashMap<Integer, Column> columnOfNumbers = new HashMap<>();
     private TaskMessage taskMessage;
-    private String key1;
-    private String key2;
-    private String key3;
-    private String key4;
-    HashMap<AbstractMap.SimpleEntry<String, String>, CompositeKey> compositeKeyPool = new HashMap<>();
+    private int key1;
+    private int key2;
     ////////////////////
     // Actor Behavior //
     ////////////////////
@@ -123,60 +115,50 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         return this;
     }
 
-    private CompositeKey getCompositeKey(String subKey1, String subKey2) {
-        AbstractMap.SimpleEntry<String, String> keyPair = new AbstractMap.SimpleEntry<>(subKey1, subKey2);
-        CompositeKey compositeKey = compositeKeyPool.get(keyPair);
-        if (compositeKey == null) {
-            compositeKey = new CompositeKey(subKey1, subKey2);
-            compositeKeyPool.put(keyPair, compositeKey);
-        }
-        return compositeKey;
-    }
 
     private Behavior<Message> handle(TaskMessage message) {
         this.taskMessage = message;
         key1 = message.getKey1();
         key2 = message.getKey2();
-        key3 = message.getKey3();
-        key4 = message.getKey4();
-        this.getContext().getLog().info("The keys are {} : {} and {} : {}", key1, key2, key3, key4);
+
+        this.getContext().getLog().info("The keys are {} : {}", key1, key2);
         this.getContext().getLog().info("New Task {}", message.getTaskId());
         // This is for if the column is a string column
         if (message.isStringColumn()) {
             // if I need both columns
-            if (!columnOfStrings.containsKey(getCompositeKey(key1, key2)) && !columnOfStrings.containsKey(getCompositeKey(key3, key4))) {
-                this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
+            if (!columnOfStrings.containsKey(key1) && !columnOfStrings.containsKey(key2)) {
+                this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {}", this.getContext().getSelf().path().name(), key1, key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), message.getKey3(), message.getKey4(), true, true);
+                        this.getContext().getSelf(), message.getTaskId(), message.getKey1(), message.getKey2(), true, true);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-            } else if (!columnOfStrings.containsKey(getCompositeKey(key1, key2))) {
+            } else if (!columnOfStrings.containsKey(key1)) {
                 this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, true);
+                        this.getContext().getSelf(), message.getTaskId(), key1, -1, false, true);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-            } else if (!columnOfStrings.containsKey(getCompositeKey(key3, key4))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key3, key4);
+            } else if (!columnOfStrings.containsKey(key2)) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {}", this.getContext().getSelf().path().name(), key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, true);
+                        this.getContext().getSelf(), message.getTaskId(), key2, -1, false, true);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             } else
                 findingIND();
             //This is if the column is a number column
         } else {
-            if (!columnOfNumbers.containsKey(getCompositeKey(key1, key2)) && !columnOfNumbers.containsKey(getCompositeKey(key3, key4))) {
-                this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {} and {} : {}", this.getContext().getSelf().path().name(), key1, key2, key3, key4);
+            if (!columnOfNumbers.containsKey(key1) && !columnOfNumbers.containsKey(key2)) {
+                this.getContext().getLog().info("I am worker {} and I need a column1 and column2, the keys are {} : {} ", this.getContext().getSelf().path().name(), key1, key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key1, key2, key3, key4, true, false);
+                        this.getContext().getSelf(), message.getTaskId(), key1, key2, true, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-            } else if (!columnOfNumbers.containsKey(getCompositeKey(key1, key2))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key1, key2);
+            } else if (!columnOfNumbers.containsKey(key1)) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {}", this.getContext().getSelf().path().name(), key1);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key1, key2, null, null, false, false);
+                        this.getContext().getSelf(), message.getTaskId(), key1, -1, false, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
-            } else if (!columnOfNumbers.containsKey(getCompositeKey(key3, key4))) {
-                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {} and {}", this.getContext().getSelf().path().name(), key3, key4);
+            } else if (!columnOfNumbers.containsKey(key2)) {
+                this.getContext().getLog().info("I am worker {} and I need a column, the keys are {}", this.getContext().getSelf().path().name(), key2);
                 LargeMessageProxy.LargeMessage requestColumn = new DependencyMiner.getNeededColumnMessage(
-                        this.getContext().getSelf(), message.getTaskId(), key3, key4, null, null, false, false);
+                        this.getContext().getSelf(), message.getTaskId(), key2, -1, false, false);
                 this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(requestColumn, message.getDependencyMinerLargeMessageProxy()));
             } else
                 findingIND();
@@ -193,24 +175,24 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
     private Behavior<Message> handle(ColumnReceiver message) {
         this.getContext().getLog().info("I am worker {} and I got a columns, the keys I needed", this.getContext().getSelf().path().name());
         if (message.gotBothColumns) {
-            if (message.column.getType().equals("string")) {
-                this.columnOfStrings.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
-                this.columnOfStrings.put(getCompositeKey(message.getKey3(), message.getKey4()), message.column2);
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
+            if (message.column.isString()) {
+                this.columnOfStrings.put(message.getKey1(), message.column);
+                this.columnOfStrings.put(message.getKey2(), message.column2);
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey1());
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey2());
             } else {
-                this.columnOfNumbers.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
-                this.columnOfNumbers.put(getCompositeKey(message.getKey3(), message.getKey4()), message.column2);
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey3(), message.getKey4());
+                this.columnOfNumbers.put(message.getKey1(), message.column);
+                this.columnOfNumbers.put(message.getKey2(), message.column2);
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey1());
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey2());
             }
         } else {
-            if (message.column.getType().equals("string")) {
-                this.columnOfStrings.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+            if (message.column.isString()) {
+                this.columnOfStrings.put(message.getKey1(), message.column);
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey1());
             } else {
-                this.columnOfNumbers.put(getCompositeKey(message.getKey1(), message.getKey2()), message.column);
-                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {} and {}", this.getContext().getSelf().path().name(), message.getKey1(), message.getKey2());
+                this.columnOfNumbers.put(message.getKey1(), message.column);
+                this.getContext().getLog().info("I am worker {} and I got a column, the keys are {}", this.getContext().getSelf().path().name(), message.getKey1());
             }
         }
 
@@ -225,11 +207,11 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
         Column column1;
         Column column2;
         if (taskMessage.isStringColumn()) {
-            column1 = columnOfStrings.get(getCompositeKey(taskMessage.getKey1(), taskMessage.getKey2()));
-            column2 = columnOfStrings.get(getCompositeKey(taskMessage.getKey3(), taskMessage.getKey4()));
+            column1 = columnOfStrings.get(taskMessage.getKey1());
+            column2 = columnOfStrings.get(taskMessage.getKey2());
         } else {
-            column1 = columnOfNumbers.get(getCompositeKey(taskMessage.getKey1(), taskMessage.getKey2()));
-            column2 = columnOfNumbers.get(getCompositeKey(taskMessage.getKey3(), taskMessage.getKey4()));
+            column1 = columnOfNumbers.get(taskMessage.getKey1());
+            column2 = columnOfNumbers.get(taskMessage.getKey2());
         }
         this.getContext().getLog().info("Looking for IND between {} and {}", column1, column2);
         result = column1.getColumnValues().containsAll(column2.getColumnValues());
@@ -239,8 +221,8 @@ public class DependencyWorker extends AbstractBehavior<DependencyWorker.Message>
                 this.getContext().getSelf(),
                 taskMessage.getTaskId(),
                 result,
-                column1,
-                column2);
+                key1,key2,
+                taskMessage.isStringColumn);
 
         this.largeMessageProxy.tell(new LargeMessageProxy.SendMessage(resultMessage, taskMessage.getDependencyMinerLargeMessageProxy()));
 

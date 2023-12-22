@@ -8,15 +8,16 @@ public class Column {
     private final int id;
     //To make sure that the values are unique
     private final HashSet<String> columnValues;
-    private final String type;
     @Getter
     private String columnName;
     @Getter
+    private final boolean isString;
+    @Getter
     private String nameOfDataset;
 
-    Column(int id, String type, String columnName, String nameOfDataset){
+    Column(int id, boolean isString, String columnName, String nameOfDataset){
         this.id = id;
-        this.type = type;
+        this.isString = isString;
         this.columnName = columnName;
         this.nameOfDataset = nameOfDataset;
         columnValues = new HashSet<>();
@@ -33,8 +34,6 @@ public class Column {
         return columnValues;
     }
 
-    public String getType() {
-    	return this.type;
-    }
+
 
 }
