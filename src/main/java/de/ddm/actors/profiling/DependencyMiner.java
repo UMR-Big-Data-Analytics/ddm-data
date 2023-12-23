@@ -133,7 +133,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final HashMap<Integer, Column> columnOfStrings = new HashMap<>();
     private final HashMap<Integer, Column> columnOfNumbers = new HashMap<>();
     private final HashMap<String, Integer> keyDictionary = new HashMap<>();
-    HashMap<AbstractMap.SimpleEntry<String, String>, CompositeKey> compositeKeyPool = new HashMap<>();
     private final List<DependencyWorker.TaskMessage> listOfTasks = new ArrayList<>();
     private boolean allTasksHavebeenCreated = false;
     private int currentTask = 0;
@@ -220,15 +219,6 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
         return true;
     }
 
-    private CompositeKey getCompositeKey(String subKey1, String subKey2) {
-        AbstractMap.SimpleEntry<String, String> keyPair = new AbstractMap.SimpleEntry<>(subKey1, subKey2);
-        CompositeKey compositeKey = compositeKeyPool.get(keyPair);
-        if (compositeKey == null) {
-            compositeKey = new CompositeKey(subKey1, subKey2);
-            compositeKeyPool.put(keyPair, compositeKey);
-        }
-        return compositeKey;
-    }
 
     private Behavior<Message> handle(BatchMessage message) {
         this.getContext().getLog().info("Received batch of {} rows for file {}!", message.getBatch().size(), this.inputFiles[message.getId()].getName());
