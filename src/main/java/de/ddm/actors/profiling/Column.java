@@ -1,10 +1,11 @@
 package de.ddm.actors.profiling;
 
+import de.ddm.serialization.AkkaSerializable;
 import lombok.Getter;
 
 import java.util.HashSet;
 
-public class Column {
+public class Column implements AkkaSerializable {
     private final int id;
     //To make sure that the values are unique
     private final HashSet<String> columnValues;
