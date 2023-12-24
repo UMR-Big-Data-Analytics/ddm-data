@@ -129,7 +129,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
     private final String[][] headerLines;
     private final boolean[] allFilesHaveBeenRead;
     private final List<ActorRef<LargeMessageProxy.Message>> dependencyWorkersLargeMessageProxy;
-    // CompositeKey the first key is the name of the file and the second key is the name of the column
+    // CompositeKey the first key is the name of the file and the second key is the name of the column1
     private final HashMap<Integer, Column> columnOfStrings = new HashMap<>();
     private final HashMap<Integer, Column> columnOfNumbers = new HashMap<>();
     private final HashMap<String, Integer> keyDictionary = new HashMap<>();
@@ -160,7 +160,7 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 .build();
     }
 
-    // This is for the dependencyWorker to ask for a column
+    // This is for the dependencyWorker to ask for a column1
     private Behavior<Message> handle(getNeededColumnMessage getNeededColumnMessage) {
         if (getNeededColumnMessage.getBothColumns) {
             if (getNeededColumnMessage.isString) {
@@ -168,30 +168,43 @@ public class DependencyMiner extends AbstractBehavior<DependencyMiner.Message> {
                 getNeededColumnMessage.
                         getDependencyWorker().
                         tell(new DependencyWorker.
-                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfStrings.get(getNeededColumnMessage.getKey1())
-                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfStrings.get(getNeededColumnMessage.getKey2())));
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, true,columnOfStrings.get(getNeededColumnMessage.getKey1()).getColumnValues()
+                                , columnOfStrings.get(getNeededColumnMessage.getKey2()).getColumnValues()));
             } else {
                 this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
                 getNeededColumnMessage.
                         getDependencyWorker().
                         tell(new DependencyWorker.
-                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true, columnOfNumbers.get(getNeededColumnMessage.getKey1())
-                                , getNeededColumnMessage.getKey1(), getNeededColumnMessage.getKey2(), columnOfNumbers.get(getNeededColumnMessage.getKey2())));
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), true,false, columnOfNumbers.get(getNeededColumnMessage.getKey1()).getColumnValues()
+                                , columnOfNumbers.get(getNeededColumnMessage.getKey2()).getColumnValues()));
             }
         } else if (getNeededColumnMessage.isString) {
             this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
-            getNeededColumnMessage.
-                    getDependencyWorker().
-                    tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfStrings.get(getNeededColumnMessage.getKey1())
-                            , getNeededColumnMessage.getKey1(), -1, null));
-
+            if(getNeededColumnMessage.getKey2() == -1)
+                getNeededColumnMessage.
+                        getDependencyWorker().
+                        tell(new DependencyWorker.
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), false,true, columnOfStrings.get(getNeededColumnMessage.getKey1()).getColumnValues()
+                                , null));
+            else
+                getNeededColumnMessage.
+                        getDependencyWorker().
+                        tell(new DependencyWorker.
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), false,true, null
+                                , columnOfStrings.get(getNeededColumnMessage.getKey2()).getColumnValues()));
         } else {
-            this.getContext().getLog().info("Received getNeededColumnMessage from worker {} for task {}!", getNeededColumnMessage.getDependencyWorker(), getNeededColumnMessage.getTaskId());
-            getNeededColumnMessage.getDependencyWorker()
-                    .tell(new DependencyWorker.
-                            ColumnReceiver(getNeededColumnMessage.getTaskId(), false, columnOfNumbers.get(getNeededColumnMessage.getKey1())
-                            , getNeededColumnMessage.getKey1(), -1, null));
+            if(getNeededColumnMessage.getKey2() == -1)
+                getNeededColumnMessage.
+                        getDependencyWorker().
+                        tell(new DependencyWorker.
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), false,false, columnOfNumbers.get(getNeededColumnMessage.getKey1()).getColumnValues()
+                                , null));
+            else
+                getNeededColumnMessage.
+                        getDependencyWorker().
+                        tell(new DependencyWorker.
+                                ColumnReceiver(getNeededColumnMessage.getTaskId(), false,false, null
+                                , columnOfNumbers.get(getNeededColumnMessage.getKey2()).getColumnValues()));
         }
         return this;
     }
