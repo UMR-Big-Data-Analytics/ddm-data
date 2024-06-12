@@ -1,4 +1,6 @@
 # ddm-akka
+Solution of the Big Data Systems homework from the Big Byte Brigade ([FlowBYRN](https://github.com/FlowBYRN) und [degtyardmitry](https://github.com/degtyardmitry))
+
 Akka example and homework code for the "Big Data Systems" lecture.
 
 ## Requirements
