@@ -19,7 +19,7 @@
 bin/
 target/
 output/
-data/TPCH/
+data/
 src/main/java/de/ddm/tutorial/
 
 # IDE files
@@ -36,6 +36,8 @@ release.properties
 /.idea
 *.iml
 *.class
+*.ipr
+*.iws
 
 # Application files
 results.txt

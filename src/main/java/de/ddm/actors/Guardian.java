@@ -2,6 +2,7 @@ package de.ddm.actors;
 
 import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
+import akka.actor.typed.PostStop$;
 import akka.actor.typed.javadsl.*;
 import akka.actor.typed.receptionist.Receptionist;
 import akka.actor.typed.receptionist.ServiceKey;
@@ -60,10 +61,10 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 				context -> Behaviors.withTimers(timers -> new Guardian(context, timers)));
 	}
 
-	private Guardian(ActorContext<Message> context, TimerScheduler<Message> timers) {
+	private Guardian(ActorContext<Message> context, TimerScheduler<Message> timer) {
 		super(context);
 
-		this.timers = timers;
+		this.timer = timer;
 
 		this.reaper = context.spawn(Reaper.create(), Reaper.DEFAULT_NAME);
 		this.master = this.isMaster() ? context.spawn(Master.create(), Master.DEFAULT_NAME) : null;
@@ -83,7 +84,7 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 	// Actor State //
 	/////////////////
 
-	private final TimerScheduler<Message> timers;
+	private final TimerScheduler<Message> timer;
 
 	private Set<ActorRef<Message>> userGuardians = new HashSet<>();
 
@@ -120,8 +121,8 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 				if (!userGuardian.equals(self))
 					userGuardian.tell(new ShutdownMessage(self));
 
-			if (!this.timers.isTimerActive("ShutdownReattempt"))
-				this.timers.startTimerAtFixedRate("ShutdownReattempt", message, Duration.ofSeconds(5), Duration.ofSeconds(5));
+			if (!this.timer.isTimerActive("ShutdownReattempt"))
+				this.timer.startTimerAtFixedRate("ShutdownReattempt", message, Duration.ofSeconds(5), Duration.ofSeconds(5));
 		}
 		return this;
 	}
@@ -144,7 +145,7 @@ public class Guardian extends AbstractBehavior<Guardian.Message> {
 	private Behavior<Message> handle(ReceptionistListingMessage message) {
 		this.userGuardians = message.getListing().getServiceInstances(Guardian.guardianService);
 
-		if (this.timers.isTimerActive("ShutdownReattempt") && this.isClusterDown())
+		if (this.timer.isTimerActive("ShutdownReattempt") && this.isClusterDown())
 			this.shutdown();
 
 		return this;

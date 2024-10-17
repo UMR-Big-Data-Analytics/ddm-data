@@ -58,6 +58,6 @@ Akka example and homework code for the "Big Data Systems" lecture.
 ## Hints
 
 1. Run `java -jar target/ddm-akka-1.0.jar` without arguments to have a help text printed to your console. It will describe all parameters in detail.
-2. Use `java -Xms2048m -Xmx2048m` to restrict your program run to two gigabyte of memory. This ensures that it runs on the Pi cluster.
-3. Use `LargeMessageProxy` to process large messages.
-4. For checking memory usage, [see this thread](https://stackoverflow.com/a/62325370).
+2. Use `java -Xms2048m -Xmx2048m` to restrict your program run to two gigabyte of memory. This ensures that it runs on a Pi cluster.
+3. Use `LargeMessageProxy` to send large messages.
+4. Use `MemoryUstils` to measure byte sizes and memory usage.

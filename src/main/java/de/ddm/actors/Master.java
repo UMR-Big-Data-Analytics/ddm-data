@@ -72,7 +72,7 @@ public class Master extends AbstractBehavior<Master.Message> {
 	}
 
 	private Behavior<Message> handle(ShutdownMessage message) {
-		// If we expect the system to still be active when the a ShutdownMessage is issued,
+		// If we expect the system to still be active when a ShutdownMessage is issued,
 		// we should propagate this ShutdownMessage to all active child actors so that they
 		// can end their protocols in a clean way. Simply stopping this actor also stops all
 		// child actors, but in a hard way!
